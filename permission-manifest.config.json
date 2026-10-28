@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "application": {"businessCode": "xingyuan", "applicationCode": "tianji"},
+  "producerId": "tianji-web",
+  "ownedKeyPrefixes": ["tianji.app.", "tianji.menu.", "tianji.page.", "tianji.button."],
+  "expectedModules": ["console"],
+  "modules": {
+    "console": {"entryPoints": ["src/permissions/permissions.ts", "src/permissions/resources.ts",
+      "src/permissions/messages.ts", "src/permissions/references.ts"]}
+  },
+  "artifact": {"repository": "tianji-web"},
+  "tsconfig": "tsconfig.app.json",
+  "toolchainLock": "permission-toolchain.local.lock.json"
+}
