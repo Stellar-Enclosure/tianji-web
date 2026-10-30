@@ -15,6 +15,7 @@ body { margin: 0; }
 .form-alert { margin-bottom: 16px; }
 .full-width { width: 100%; }
 .memory-owner-select { min-width: 140px; }
+.preference-key { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #f5f7fa; }
 .auth-card { width: min(100%, 520px); box-shadow: 0 8px 32px rgb(18 31 52 / 7%); }
 @media (max-width: 900px) { .detail-grid { grid-template-columns: 1fr; } }

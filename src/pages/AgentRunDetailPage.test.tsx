@@ -97,4 +97,15 @@ describe('Agent run detail', () => {
     expect(await screen.findByText(/部分历史事件已过期/)).toBeInTheDocument()
     await waitFor(() => expect(agentApi.get).toHaveBeenCalledTimes(2))
   })
+
+  it('enables preference extraction only after the matching actual completed status event arrives', async () => {
+    vi.mocked(agentApi.get).mockResolvedValue({...run('run-1', 'COMPLETED'), finishedAt: '2026-10-31T00:00:00Z'})
+    vi.mocked(agentApi.result).mockResolvedValue({runId: 'run-1', status: 'COMPLETED', output: {}, errorCode: null, sideEffectOutcome: null})
+    let receive: Parameters<typeof observeAgentRun>[0]['onEvent'] | undefined
+    vi.mocked(observeAgentRun).mockImplementation(options => { receive = options.onEvent; return new Promise(resolve => options.signal.addEventListener('abort', () => resolve(), {once: true})) })
+    render(view()); await waitFor(() => expect(receive).toBeDefined())
+    expect(screen.getByRole('button', {name: '提取偏好候选'})).toBeDisabled()
+    await act(async () => { receive?.({eventId: 'actual-terminal', runId: 'run-1', sequence: 1, type: 'RUN_STATUS_CHANGED', occurredAt: '2026-10-31T00:00:00Z', author: null, payload: {status: 'COMPLETED'}}) })
+    expect(screen.getByRole('button', {name: '提取偏好候选'})).toBeEnabled()
+  })
 })

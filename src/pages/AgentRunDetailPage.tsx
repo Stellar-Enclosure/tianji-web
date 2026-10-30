@@ -6,14 +6,15 @@ import {agentApi, isRunId, isTerminal, type AgentEvent, type AgentResult, type A
 import {AgentStreamError, observeAgentRun} from '../api/agentEvents'
 import {useAuth} from '../auth/AuthContext'
 import {StatusTag} from './AgentRunsPage'
+import MemoryPreferenceAction from './MemoryPreferenceAction'
 
-type VisibleEvent = Readonly<{sequence: number; type: string; author: string | null; occurredAt: string; summary: string}>
+type VisibleEvent = Readonly<{eventId: string; sequence: number; type: string; author: string | null; occurredAt: string; summary: string; completed: boolean}>
 
 export default function AgentRunDetailPage() {
   const {runId = ''} = useParams()
   const {authorization} = useAuth()
   const tenant = authorization?.identity.tenantId ?? ''
-  return <AgentRunDetailContent key={`${tenant}:${runId}`} runId={runId} tenant={tenant} />
+  return <AgentRunDetailContent key={JSON.stringify([authorization?.identity.issuer, tenant, authorization?.identity.subject, authorization?.binding.requestEpoch, runId])} runId={runId} tenant={tenant} />
 }
 
 function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string}) {
@@ -174,6 +175,7 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
     {notice && <Alert type="warning" showIcon message={notice} />}
     {cancelMessage && <Alert type="info" showIcon message={cancelMessage} />}
     {!run && !displayError && <Spin description="正在读取运行" />}
+    <MemoryPreferenceAction runId={runId} completed={run?.status === 'COMPLETED'} sourceEventId={events.find(event => event.completed && event.sequence === run?.lastEventSequence)?.eventId} />
     {run && run.runId === runId && <>
       <Card variant="borderless" className="surface-card">
         <Descriptions column={{xs: 1, sm: 2, lg: 3}} items={[
@@ -213,7 +215,7 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
 
 const visible = (event: AgentEvent): VisibleEvent => {
   const raw = typeof event.payload.text === 'string' ? event.payload.text : JSON.stringify(event.payload)
-  return {sequence: event.sequence, type: event.type, author: event.author, occurredAt: event.occurredAt,
+  return {eventId: event.eventId, sequence: event.sequence, type: event.type, author: event.author, occurredAt: event.occurredAt, completed: event.type === 'RUN_STATUS_CHANGED' && event.payload.status === 'COMPLETED',
     summary: raw.length > 2048 ? `${raw.slice(0, 2048)}…` : raw === '{}' ? '' : raw}
 }
 const formatOutput = (output: Readonly<Record<string, unknown>>): string =>
