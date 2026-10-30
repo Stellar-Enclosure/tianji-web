@@ -1,9 +1,9 @@
 import {defineResources} from '@stellar-enclosure/stellar-enclosure-web-shared/permissions'
-import {CANCEL, READ, START} from './permissions'
+import {CANCEL, READ, START, MEMORY_READ, MEMORY_WRITE, MEMORY_FORGET} from './permissions'
 
 export const resources = defineResources([
   {key: 'tianji.app.console', type: 'APP', target: {applicationCode: 'tianji'},
-    requirement: {mode: 'ALL', codes: [READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'app.console'}},
+    requirement: {mode: 'ANY', codes: [READ, MEMORY_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'app.console'}},
   {key: 'tianji.page.runs', type: 'PAGE', target: {route: '/runs'},
     requirement: {mode: 'ALL', codes: [READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.runs'}},
   {key: 'tianji.page.runDetail', type: 'PAGE', target: {route: '/runs/:runId'},
@@ -14,4 +14,12 @@ export const resources = defineResources([
     requirement: {mode: 'ALL', codes: [READ, START]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.start'}},
   {key: 'tianji.button.runDetail.cancel', type: 'BUTTON', target: {component: 'src/pages/AgentRunDetailPage.tsx', action: 'cancel'},
     requirement: {mode: 'ALL', codes: [READ, CANCEL]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.cancel'}},
+  {key: 'tianji.page.memoryCandidates', type: 'PAGE', target: {route: '/memory'},
+    requirement: {mode: 'ALL', codes: [MEMORY_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.memoryCandidates'}},
+  {key: 'tianji.menu.memoryCandidates', type: 'MENU', target: {route: '/memory', parentKey: 'tianji.app.console'},
+    requirement: {mode: 'ALL', codes: [MEMORY_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.memoryCandidates'}},
+  {key: 'tianji.button.memoryCandidates.confirm', type: 'BUTTON', target: {component: 'src/pages/MemoryCandidatesPage.tsx', action: 'confirm'},
+    requirement: {mode: 'ALL', codes: [MEMORY_READ, MEMORY_WRITE]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.memoryConfirm'}},
+  {key: 'tianji.button.memoryCandidates.reject', type: 'BUTTON', target: {component: 'src/pages/MemoryCandidatesPage.tsx', action: 'reject'},
+    requirement: {mode: 'ALL', codes: [MEMORY_READ, MEMORY_FORGET]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.memoryReject'}},
 ] as const)

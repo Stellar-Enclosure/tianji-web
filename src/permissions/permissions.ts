@@ -3,4 +3,7 @@ import {definePermissionReferences} from '@stellar-enclosure/stellar-enclosure-w
 export const READ = 'TIANJI_AGENT_READ' as const
 export const START = 'TIANJI_AGENT_START' as const
 export const CANCEL = 'TIANJI_AGENT_CANCEL' as const
-export const permissions = definePermissionReferences([READ, START, CANCEL] as const)
+export const MEMORY_READ = 'TIANJI_MEMORY_READ' as const
+export const MEMORY_WRITE = 'TIANJI_MEMORY_WRITE' as const
+export const MEMORY_FORGET = 'TIANJI_MEMORY_FORGET' as const
+export const permissions = definePermissionReferences([READ, START, CANCEL, MEMORY_READ, MEMORY_WRITE, MEMORY_FORGET] as const)

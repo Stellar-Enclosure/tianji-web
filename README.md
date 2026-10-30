@@ -4,6 +4,8 @@ React console for Tianji Agent runs. The console lists runs belonging to the cur
 
 The application uses the shared Enterprise layout, gateway Cookie/CSRF client and Jianshen resource registry. It does not store browser bearer tokens. The permission view must match the verified issuer, subject, tenant and catalog scope before routes or actions are shown. The `X-Egon-Tianji-Tenant` header checks that the gateway session has not changed; it does not select a tenant.
 
+The candidate-memory page reads an explicitly selected personal or team scope. Personal ownership comes from the verified subject; team access is checked by the service. Only unconfirmed candidates are displayed, as plain text. Confirmation preserves the reviewed content through a revision-checked correction with a new human-review source declaration; discard uses the separate forget permission and command. An uncertain response keeps its original command and freezes further edits until the operator retries it. A rejected command requires a fresh read. Candidate reading, confirmation and discard require their respective Memory permissions; Agent-run access remains independently controlled. This page requires the service's default-off Memory HTTP feature to be configured separately. It does not automatically extract, activate or merge memories.
+
 ## Configuration
 
 Copy `.env.example` to an ignored local environment file and set:

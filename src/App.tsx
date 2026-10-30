@@ -1,4 +1,4 @@
-import {AppstoreOutlined, LogoutOutlined} from '@ant-design/icons'
+import {AppstoreOutlined, AuditOutlined, LogoutOutlined} from '@ant-design/icons'
 import {EnterpriseLayout, type EnterpriseLayoutConfig} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Result, Spin, Tag} from 'antd'
 import type {ReactNode} from 'react'
@@ -6,6 +6,7 @@ import {BrowserRouter, Navigate, Outlet, Route, Routes} from 'react-router-dom'
 import {AuthProvider, useAuth} from './auth/AuthContext'
 import AgentRunDetailPage from './pages/AgentRunDetailPage'
 import AgentRunsPage from './pages/AgentRunsPage'
+import MemoryCandidatesPage from './pages/MemoryCandidatesPage'
 
 const configuredBase: string = import.meta.env.VITE_BASE_PATH ?? '/'
 if (!configuredBase.startsWith('/') || configuredBase.startsWith('//') || /[\\?#%]/.test(configuredBase)
@@ -18,7 +19,7 @@ export default function App() {
 }
 
 function SessionRoutes() {
-  const {status, error, login, retry} = useAuth()
+  const {status, error, login, retry, allows} = useAuth()
   if (status === 'loading') return <Spin fullscreen description="正在验证会话" />
   if (status !== 'ready') {
     return <main className="auth-shell"><Card variant="borderless" className="auth-card">
@@ -31,9 +32,10 @@ function SessionRoutes() {
   }
   return <Routes>
     <Route element={<Shell />}>
-      <Route index element={<Navigate to="/runs" replace />} />
+      <Route index element={<Navigate to={allows('tianji.page.runs') ? '/runs' : '/memory'} replace />} />
       <Route path="/runs" element={<RequireResource resource="tianji.page.runs"><AgentRunsPage /></RequireResource>} />
       <Route path="/runs/:runId" element={<RequireResource resource="tianji.page.runDetail"><AgentRunDetailPage /></RequireResource>} />
+      <Route path="/memory" element={<RequireResource resource="tianji.page.memoryCandidates"><MemoryCandidatesPage /></RequireResource>} />
       <Route path="*" element={<Result status="404" title="页面不存在" />} />
     </Route>
   </Routes>
@@ -50,8 +52,10 @@ function Shell() {
   const embedded = (window as Window & {$wujie?: {props?: {embedded?: boolean}}}).$wujie?.props?.embedded === true
   const config: EnterpriseLayoutConfig = {
     platformName: '天机 · 智能编排',
-    navigation: allows('tianji.menu.runs') ? [{key: 'runs', label: '运行记录', path: '/runs',
-      activePathPrefixes: ['/runs'], icon: <AppstoreOutlined />}] : [],
+    navigation: [
+      ...(allows('tianji.menu.runs') ? [{key: 'runs', label: '运行记录', path: '/runs', activePathPrefixes: ['/runs'], icon: <AppstoreOutlined />}] : []),
+      ...(allows('tianji.menu.memoryCandidates') ? [{key: 'memory', label: '候选记忆', path: '/memory', activePathPrefixes: ['/memory'], icon: <AuditOutlined />}] : []),
+    ],
     actions: <Tag color="success">会话已验证</Tag>,
     user: {name: authorization.identity.subject, description: `租户 ${authorization.identity.tenantId}`,
       menu: [{key: 'logout', label: '退出登录', icon: <LogoutOutlined />, onClick: () => void logout()}]},
