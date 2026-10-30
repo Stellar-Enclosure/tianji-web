@@ -12,4 +12,5 @@ export const messages = defineMessages([
   {pageCode: 'tianji.web.permissions', key: 'button.memoryConfirm', defaultLocale: 'zh-CN', defaults: {'zh-CN': '确认候选', 'en-US': 'Confirm candidate'}},
   {pageCode: 'tianji.web.permissions', key: 'button.memoryReject', defaultLocale: 'zh-CN', defaults: {'zh-CN': '丢弃候选', 'en-US': 'Discard candidate'}},
   {pageCode: 'tianji.web.permissions', key: 'button.extractPreferences', defaultLocale: 'zh-CN', defaults: {'zh-CN': '提取偏好候选', 'en-US': 'Extract preference candidates'}},
+  {pageCode: 'tianji.web.permissions', key: 'button.memoryCompare', defaultLocale: 'zh-CN', defaults: {'zh-CN': '比较记忆条目', 'en-US': 'Compare memory entries'}},
 ] as const)

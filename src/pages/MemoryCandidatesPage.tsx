@@ -4,6 +4,7 @@ import {useCallback, useEffect, useRef, useState} from 'react'
 import {MEMORY_KINDS, isMemoryIdentifier, memoryApi, type MemoryCandidate, type MemoryCandidatePage, type MemoryCandidateQuery,
   type MemoryKind, type RejectCommand, type ReviewCommand} from '../api/memory'
 import {useAuth} from '../auth/AuthContext'
+import MemoryMergeDialog from './MemoryMergeDialog'
 
 type Filters = {ownerType: 'USER' | 'TEAM'; teamId?: string; scopeId: string; kind?: MemoryKind}
 type Pending = {action: 'confirm'; entry: MemoryCandidate; command: ReviewCommand} | {action: 'reject'; entry: MemoryCandidate; command: RejectCommand}
@@ -28,6 +29,7 @@ function MemoryCandidatesContent({tenant, subject}: {tenant: string; subject: st
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [dialog, setDialog] = useState<{action: Pending['action']; entry: MemoryCandidate}>()
+  const [comparison, setComparison] = useState<MemoryCandidate>()
   const [pending, setPending] = useState<Pending>()
   const [submitting, setSubmitting] = useState(false)
   const [writeError, setWriteError] = useState<string>()
@@ -120,7 +122,8 @@ function MemoryCandidatesContent({tenant, subject}: {tenant: string; subject: st
           {title: '来源置信度', dataIndex: 'confidence', width: 110, render: (value: number) => `${Math.round(value * 100)}% · 待确认`},
           {title: '分类', dataIndex: 'sensitivity', width: 125},
           {title: '到期时间', dataIndex: 'expiresAt', width: 185, render: (value: string | null) => value === null ? '未设置到期时间' : new Date(value).toLocaleString()},
-          {title: '操作', key: 'actions', width: 160, render: (_, entry) => <Space>
+          {title: '操作', key: 'actions', width: 210, render: (_, entry) => <Space>
+            {allows('tianji.button.memoryCandidates.compare') && <Button type="link" disabled={!!pending || submitting} onClick={() => setComparison(entry)}>比较</Button>}
             {allows('tianji.button.memoryCandidates.confirm') && <Button type="link" disabled={!!pending || submitting} onClick={() => open('confirm', entry)}>确认</Button>}
             {allows('tianji.button.memoryCandidates.reject') && <Button type="link" danger disabled={!!pending || submitting} onClick={() => open('reject', entry)}>丢弃</Button>}
           </Space>},
@@ -137,6 +140,8 @@ function MemoryCandidatesContent({tenant, subject}: {tenant: string; subject: st
         <CandidateContent entry={dialog.entry} /><Typography.Paragraph type="secondary">原始来源声明：{dialog.entry.source.reference}</Typography.Paragraph>
         <Typography.Text type="secondary">版本 {dialog.entry.revision} · {labels[dialog.entry.kind]}</Typography.Text></>}
     </Modal>
+    {comparison && <MemoryMergeDialog key={JSON.stringify([comparison.owner.type, comparison.owner.id, comparison.scopeId, comparison.memoryId, comparison.revision, comparison.contentSha256])}
+      tenant={tenant} candidate={comparison} onClose={() => setComparison(undefined)} />}
   </section>
 }
 

@@ -11,6 +11,7 @@ export type MemoryCandidate = Readonly<{
   sensitivity: 'PUBLIC' | 'INTERNAL' | 'CONFIDENTIAL' | 'RESTRICTED'; retentionPolicyRef: string
   effectiveAt: string; expiresAt: string | null; createdAt: string; updatedAt: string
 }>
+export type MemoryActiveFact = Omit<MemoryCandidate, 'state' | 'confirmed'> & Readonly<{state: 'ACTIVE'; confirmed: true}>
 export type MemoryCandidateQuery = Readonly<{owner: MemoryOwner; scopeId: string; kind: MemoryKind | null; afterMemoryId: string | null; limit: number}>
 export type MemoryCandidatePage = Readonly<{owner: MemoryOwner; scopeId: string; items: readonly MemoryCandidate[]; nextAfterMemoryId: string | null}>
 export type ReviewCommand = Readonly<{
@@ -52,17 +53,19 @@ const source = (value: unknown): value is MemorySource => record(value) && keys(
   && (value.sourceRunId === null) === (value.sourceEventId === null)
 const candidateKeys = ['owner', 'scopeId', 'memoryId', 'kind', 'revision', 'supersedesRevision', 'state', 'confirmed', 'content', 'contentSha256', 'source', 'confidence',
   'sensitivity', 'retentionPolicyRef', 'effectiveAt', 'expiresAt', 'createdAt', 'updatedAt'] as const
-export const isMemoryCandidate = (value: unknown): value is MemoryCandidate => record(value) && keys(value, candidateKeys) && owner(value.owner)
+const memoryEntry = (value: unknown, state: 'CANDIDATE' | 'ACTIVE'): value is MemoryCandidate | MemoryActiveFact => record(value) && keys(value, candidateKeys) && owner(value.owner)
   && typeof value.scopeId === 'string' && isMemoryIdentifier(value.scopeId) && typeof value.memoryId === 'string' && isMemoryIdentifier(value.memoryId)
   && kind(value.kind) && integer(value.revision, 1) && (value.supersedesRevision === null || integer(value.supersedesRevision, 1) && value.supersedesRevision < value.revision)
-  && value.state === 'CANDIDATE' && value.confirmed === false && content(value.content) && hash(value.contentSha256) && source(value.source)
+  && value.state === state && value.confirmed === (state === 'ACTIVE') && content(value.content) && hash(value.contentSha256) && source(value.source)
   && typeof value.confidence === 'number' && Number.isFinite(value.confidence) && value.confidence >= 0 && value.confidence <= 1
   && typeof value.sensitivity === 'string' && ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'].includes(value.sensitivity)
   && typeof value.retentionPolicyRef === 'string' && isMemoryIdentifier(value.retentionPolicyRef, 256) && instant(value.effectiveAt)
   && (value.expiresAt === null || instant(value.expiresAt) && Date.parse(value.expiresAt) > Date.parse(value.effectiveAt))
   && instant(value.createdAt) && instant(value.updatedAt) && Date.parse(value.updatedAt) >= Date.parse(value.createdAt)
+export const isMemoryCandidate = (value: unknown): value is MemoryCandidate => memoryEntry(value, 'CANDIDATE')
+export const isMemoryActiveFact = (value: unknown): value is MemoryActiveFact => memoryEntry(value, 'ACTIVE')
 
-const compareIds = (left: string, right: string): number => {
+export const compareMemoryIdentifiers = (left: string, right: string): number => {
   const a = new TextEncoder().encode(left), b = new TextEncoder().encode(right)
   for (let index = 0; index < Math.min(a.length, b.length); index++) if (a[index] !== b[index]) return a[index] - b[index]
   return a.length - b.length
@@ -84,7 +87,7 @@ export const memoryApi = {
       || !Array.isArray(value.items) || value.items.length > query.limit || !value.items.every(isMemoryCandidate) || !optionalId(value.nextAfterMemoryId)) return invalid()
     let previous = query.afterMemoryId
     for (const item of value.items) {
-      if (!sameOwner(item.owner, query.owner) || item.scopeId !== query.scopeId || query.kind !== null && item.kind !== query.kind || previous !== null && compareIds(previous, item.memoryId) >= 0) return invalid()
+      if (!sameOwner(item.owner, query.owner) || item.scopeId !== query.scopeId || query.kind !== null && item.kind !== query.kind || previous !== null && compareMemoryIdentifiers(previous, item.memoryId) >= 0) return invalid()
       previous = item.memoryId
     }
     if (value.nextAfterMemoryId !== null && (value.items.length === 0 || value.items.at(-1)?.memoryId !== value.nextAfterMemoryId)) return invalid()

@@ -6,15 +6,18 @@ import {useAuth} from '../auth/AuthContext'
 import {resourceRegistry} from '../permissions/registry'
 import {authorization} from '../test/fixtures'
 import {candidate} from '../test/memoryFixtures'
+import {memoryMergeApi, type MemoryMergePage} from '../api/memoryMerge'
+import {memoryMergePage} from '../test/memoryMergeFixtures'
 import MemoryCandidatesPage from './MemoryCandidatesPage'
 
 vi.mock('../auth/AuthContext', () => ({useAuth: vi.fn()}))
+vi.mock('../api/memoryMerge', () => ({memoryMergeApi: {compare: vi.fn()}}))
 vi.mock('../api/memory', async original => {
   const actual = await original<typeof import('../api/memory')>()
   return {...actual, memoryApi: {candidates: vi.fn(), confirm: vi.fn(), reject: vi.fn()}}
 })
 const auth = (tenant = '20', write = true) => ({status: 'ready' as const, authorization: authorization(tenant, ['TIANJI_MEMORY_READ', ...(write ? ['TIANJI_MEMORY_WRITE', 'TIANJI_MEMORY_FORGET'] : [])]),
-  allows: (key: string) => !key.startsWith('tianji.button.memoryCandidates.') || write, login: () => {}, logout: async () => {}, retry: async () => {}})
+  allows: (key: string) => !['tianji.button.memoryCandidates.confirm', 'tianji.button.memoryCandidates.reject'].includes(key) || write, login: () => {}, logout: async () => {}, retry: async () => {}})
 const page = (tenant = '20'): MemoryCandidatePage => ({owner: {type: 'USER', id: `subject-${tenant}`}, scopeId: 'research', items: [candidate(`candidate-${tenant}`, tenant)], nextAfterMemoryId: null})
 const search = async () => {
   fireEvent.change(screen.getByLabelText('业务范围'), {target: {value: 'research'}})
@@ -30,10 +33,12 @@ describe('Memory candidate review', () => {
     expect(memoryApi.candidates).not.toHaveBeenCalled(); await search()
     expect(memoryApi.candidates).toHaveBeenCalledWith('20', {owner: {type: 'USER', id: 'subject-20'}, scopeId: 'research', kind: null, afterMemoryId: null, limit: 20}, expect.any(AbortSignal))
     expect(screen.queryByRole('button', {name: '确认'})).not.toBeInTheDocument(); expect(screen.queryByRole('button', {name: '丢弃'})).not.toBeInTheDocument()
+    expect(screen.getByRole('button', {name: /^比\s*较$/})).toBeInTheDocument()
     const current = authorization('20', ['TIANJI_MEMORY_READ'])
     expect(resourceRegistry.canAccessResource('tianji.app.console', current.snapshot, current.binding)).toBe(true)
     expect(resourceRegistry.canAccessResource('tianji.page.memoryCandidates', current.snapshot, current.binding)).toBe(true)
     expect(resourceRegistry.canAccessResource('tianji.button.memoryCandidates.confirm', current.snapshot, current.binding)).toBe(false)
+    expect(resourceRegistry.canAccessResource('tianji.button.memoryCandidates.compare', current.snapshot, current.binding)).toBe(true)
   })
 
   it('confirms only explicitly reviewed content and keeps its exact command on an uncertain retry', async () => {
@@ -79,5 +84,15 @@ describe('Memory candidate review', () => {
     await waitFor(() => expect(finish).toBeDefined()); vi.mocked(useAuth).mockReturnValue(auth('21')); current.rerender(<MemoryCandidatesPage />); await search()
     await act(async () => { finish?.(page()); await Promise.resolve() })
     expect(screen.queryByText('候选内容 candidate-20')).not.toBeInTheDocument(); expect(screen.getByText('候选内容 candidate-21')).toBeInTheDocument()
+  })
+
+  it('closes and aborts a comparison when the owning identity changes', async () => {
+    let finish: ((value: MemoryMergePage) => void) | undefined
+    vi.mocked(memoryMergeApi.compare).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const current = render(<MemoryCandidatesPage />); await search(); fireEvent.click(screen.getByRole('button', {name: /^比\s*较$/}))
+    await waitFor(() => expect(finish).toBeDefined()); const signal = vi.mocked(memoryMergeApi.compare).mock.calls[0][3]
+    vi.mocked(useAuth).mockReturnValue(auth('21')); current.rerender(<MemoryCandidatesPage />); expect(signal?.aborted).toBe(true)
+    await act(async () => { finish?.(memoryMergePage(candidate('candidate-20'))); await Promise.resolve() })
+    expect(screen.queryByText('已有事实 active-a')).not.toBeInTheDocument(); expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
