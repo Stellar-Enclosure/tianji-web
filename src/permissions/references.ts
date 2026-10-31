@@ -14,4 +14,6 @@ export const references = defineResourceReferences([
   {key: 'tianji.api.memory.preparePreferences', usage: 'CALLS'},
   {key: 'tianji.api.memory.extractPreferences', usage: 'CALLS'},
   {key: 'tianji.api.memory.mergeSuggestions', usage: 'CALLS'},
+  {key: 'tianji.api.memory.preferenceIntentStatus', usage: 'CALLS'},
+  {key: 'tianji.api.memory.cancelPreferenceIntent', usage: 'CALLS'},
 ] as const)

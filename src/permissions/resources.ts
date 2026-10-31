@@ -26,4 +26,8 @@ export const resources = defineResources([
     requirement: {mode: 'ALL', codes: [MEMORY_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.memoryCompare'}},
   {key: 'tianji.button.runDetail.extractPreferences', type: 'BUTTON', target: {component: 'src/pages/MemoryPreferenceAction.tsx', action: 'extractPreferences'},
     requirement: {mode: 'ALL', codes: [READ, MEMORY_READ, MEMORY_WRITE]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.extractPreferences'}},
+  {key: 'tianji.button.runDetail.preferenceIntentStatus', type: 'BUTTON', target: {component: 'src/pages/MemoryPreferenceIntentStatus.tsx', action: 'preferenceIntentStatus'},
+    requirement: {mode: 'ALL', codes: [READ, MEMORY_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.preferenceIntentStatus'}},
+  {key: 'tianji.button.runDetail.cancelPreferenceIntent', type: 'BUTTON', target: {component: 'src/pages/MemoryPreferenceIntentStatus.tsx', action: 'cancelPreferenceIntent'},
+    requirement: {mode: 'ALL', codes: [READ, MEMORY_READ, MEMORY_FORGET]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.cancelPreferenceIntent'}},
 ] as const)

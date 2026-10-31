@@ -7,6 +7,7 @@ import {AgentStreamError, observeAgentRun} from '../api/agentEvents'
 import {useAuth} from '../auth/AuthContext'
 import {StatusTag} from './AgentRunsPage'
 import MemoryPreferenceAction from './MemoryPreferenceAction'
+import MemoryPreferenceIntentStatus from './MemoryPreferenceIntentStatus'
 
 type VisibleEvent = Readonly<{eventId: string; sequence: number; type: string; author: string | null; occurredAt: string; summary: string; completed: boolean}>
 
@@ -176,6 +177,7 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
     {cancelMessage && <Alert type="info" showIcon message={cancelMessage} />}
     {!run && !displayError && <Spin description="正在读取运行" />}
     <MemoryPreferenceAction runId={runId} completed={run?.status === 'COMPLETED'} sourceEventId={events.find(event => event.completed && event.sequence === run?.lastEventSequence)?.eventId} />
+    <MemoryPreferenceIntentStatus runId={runId} available={!!run && run.runId === runId} />
     {run && run.runId === runId && <>
       <Card variant="borderless" className="surface-card">
         <Descriptions column={{xs: 1, sm: 2, lg: 3}} items={[
