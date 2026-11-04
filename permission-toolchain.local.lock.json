@@ -9,7 +9,7 @@
   },
   "contract": {
     "coordinates": "top.egon:stellar-enclosure-tianquan-jianshen-contract:0.0.1",
-    "sha256": "c29201214f257654d31fa945c36e1e5ff879ead75f806730c431ba18e041ab01",
+    "sha256": "2077ebbb0e5aa9d35bb1350c869fc7e38879f5d476b649a754094da230ac7b18",
     "entries": {
       "permission-manifest/schema-v1.json": "eab9125dee3357ef69221f9a28b5a17c2fe04da2a012f0e4f4538c8d4ac84e6c",
       "permission-contract/manifest-v1.json": "844aa3391c9d965a4a94c312c6baea0e37db19c3961246bc4520dda4b4a41a87",
