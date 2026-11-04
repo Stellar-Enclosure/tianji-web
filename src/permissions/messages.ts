@@ -22,4 +22,8 @@ export const messages = defineMessages([
   {pageCode: 'tianji.web.permissions', key: 'button.taskUnclaim', defaultLocale: 'zh-CN', defaults: {'zh-CN': '归还任务', 'en-US': 'Return task'}},
   {pageCode: 'tianji.web.permissions', key: 'button.taskTransfer', defaultLocale: 'zh-CN', defaults: {'zh-CN': '转交任务', 'en-US': 'Transfer task'}},
   {pageCode: 'tianji.web.permissions', key: 'button.taskComplete', defaultLocale: 'zh-CN', defaults: {'zh-CN': '完成任务', 'en-US': 'Complete task'}},
+  {pageCode: 'tianji.web.permissions', key: 'page.cases', defaultLocale: 'zh-CN', defaults: {'zh-CN': '案件查询', 'en-US': 'Case lookup'}},
+  {pageCode: 'tianji.web.permissions', key: 'page.caseDetail', defaultLocale: 'zh-CN', defaults: {'zh-CN': '案件详情', 'en-US': 'Case details'}},
+  {pageCode: 'tianji.web.permissions', key: 'menu.cases', defaultLocale: 'zh-CN', defaults: {'zh-CN': '案件查询', 'en-US': 'Case lookup'}},
+  {pageCode: 'tianji.web.permissions', key: 'button.caseActPlanItem', defaultLocale: 'zh-CN', defaults: {'zh-CN': '操作计划项', 'en-US': 'Act on a plan item'}},
 ] as const)

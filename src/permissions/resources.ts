@@ -1,9 +1,10 @@
 import {defineResources} from '@stellar-enclosure/stellar-enclosure-web-shared/permissions'
-import {CANCEL, READ, START, MEMORY_READ, MEMORY_WRITE, MEMORY_FORGET, TASK_READ, TASK_CLAIM, TASK_COMPLETE, TASK_TRANSFER} from './permissions'
+import {CANCEL, READ, START, MEMORY_READ, MEMORY_WRITE, MEMORY_FORGET, TASK_READ, TASK_CLAIM, TASK_COMPLETE, TASK_TRANSFER,
+  CASE_READ, CASE_PLAN_ITEM_ACT} from './permissions'
 
 export const resources = defineResources([
   {key: 'tianji.app.console', type: 'APP', target: {applicationCode: 'tianji'},
-    requirement: {mode: 'ANY', codes: [READ, MEMORY_READ, TASK_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'app.console'}},
+    requirement: {mode: 'ANY', codes: [READ, MEMORY_READ, TASK_READ, CASE_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'app.console'}},
   {key: 'tianji.page.runs', type: 'PAGE', target: {route: '/runs'},
     requirement: {mode: 'ALL', codes: [READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.runs'}},
   {key: 'tianji.page.runDetail', type: 'PAGE', target: {route: '/runs/:runId'},
@@ -44,4 +45,12 @@ export const resources = defineResources([
     requirement: {mode: 'ALL', codes: [TASK_READ, TASK_TRANSFER]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.taskTransfer'}},
   {key: 'tianji.button.taskDetail.complete', type: 'BUTTON', target: {component: 'src/pages/TaskDetailPage.tsx', action: 'complete'},
     requirement: {mode: 'ALL', codes: [TASK_READ, TASK_COMPLETE]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.taskComplete'}},
+  {key: 'tianji.page.cases', type: 'PAGE', target: {route: '/cases'},
+    requirement: {mode: 'ALL', codes: [CASE_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.cases'}},
+  {key: 'tianji.page.caseDetail', type: 'PAGE', target: {route: '/cases/:caseInstanceId'},
+    requirement: {mode: 'ALL', codes: [CASE_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.caseDetail'}},
+  {key: 'tianji.menu.cases', type: 'MENU', target: {route: '/cases', parentKey: 'tianji.app.console'},
+    requirement: {mode: 'ALL', codes: [CASE_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.cases'}},
+  {key: 'tianji.button.caseDetail.actPlanItem', type: 'BUTTON', target: {component: 'src/pages/CaseDetailPage.tsx', action: 'actPlanItem'},
+    requirement: {mode: 'ALL', codes: [CASE_READ, CASE_PLAN_ITEM_ACT]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.caseActPlanItem'}},
 ] as const)

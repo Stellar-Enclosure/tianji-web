@@ -99,7 +99,7 @@ These are precommit local validation artifacts, not an exact clean-release claim
 
 Step 1 is verified for its single focused commit. Step 2/3 routes, forms, page effects and permissions remain unimplemented at this point; no later step source was started. The final Spec conformance audit belongs to Step 3.
 
-## Step 41 / Plan Step 2 — Verified for focused commit
+## Step 41 / Plan Step 2 — Committed
 
 Step 40 was committed as `e4a10d9eac4e837a5eed9459f3a93cda06d84276` with the exact 12 reviewed paths and a clean worktree before any Step 2 edit. The new baseline freezes all 70 tracked files in `/tmp/tianji-web-step41-baseline.json`; the exact 14 authorized paths are `/tmp/tianji-web-step41-paths.json`. All 17 Manual Check obligations and ten original Rule rows were copied into `/tmp/tianji-web-step41-lock.json`; Java-only concerns remain evidence-backed N/A, Rule 9 and Rule 11 remain applicable. Final verdicts require this step's completed diff and gates.
 
@@ -178,6 +178,101 @@ This is a local precommit validation artifact, not a clean release or permission
 | Rule 11 | Applicable | PASS | Existing pages/App/auth/permissions; committed API/State reuse | Typecheck/lint/build and exact scope | Existing architecture preserved | None |
 
 Step 2 is verified for its single focused commit. Step 3 Case lookup/actions and final ten-requirement source conformance remain pending. Actual gateway/IAM/task progression and browser acceptance remain RuntimeUnverified.
+
+## Step 42 / Plan Step 3 — Verified for focused commit
+
+Step 41 committed as `78bbcb31e05c7eeaddd013419d1cd6210eb10fe1`, exact 14 paths and clean worktree, before any Step 3 edit. Baseline `/tmp/tianji-web-step42-baseline.json` freezes 77 tracked files; `/tmp/tianji-web-step42-paths.json` locks the exact ten paths. The 17 Manual Check and ten Literal Rule obligations are copied in `/tmp/tianji-web-step42-lock.json`; final evidence is still required. Only CaseDetailPage and its test are new; Root owns the eight shared App/permission/README/evidence increments. Existing task pages, APIs, State, fixtures, lock and frozen Spec/Plan remain excluded.
+
+Root's App Case RED ran at 2026-11-05 00:41:17: `npm test -- src/App.test.tsx`, exit 1, 22 tests, 6 expected missing-resource/route failures and 16 passed, 4.98 s. Log `/tmp/tianji-web-case-pages-app-red.log`. Existing task/run/memory ordered landing cases pass. No import/fixture/runtime exception was observed. Case component RED: at 2026-11-05 00:46:23, the two first lookup/facts selectors failed with genuine missing-content assertions (18 not selected), exit 1, 3.76 s; `/tmp/tianji-web-case-pages-components-red.log`. Root authorized B afterward. Before B, permission tests were aligned with the frozen protocol: ACT-only loss disables confirmation/retry while retaining an unknown command; READ loss unmounts/aborts and discards old-frame state.
+
+### Step 3 actual gates and final source audit
+
+Case lookup/detail, four finite server-listed plan-item actions, actual submitted/finished UTC facts and separate historical receipts are implemented. Lookup/detail use distinct READ resource keys and full issuer/tenant/subject/requestEpoch/route frames. ACT-only withdrawal disables confirmation/retry without discarding an unknown intent; READ/frame changes abort and discard old state. New App admission/ordered landing, four owned resources, two permission references, two existing Case CALLS and four zh-CN/en-US labels complete the consumer scope. There is no Case start/list/history/COMPLETE/whole-Case termination API or control.
+
+| Gate/log | Actual result | Classification/correction |
+| --- | --- | --- |
+| `/tmp/tianji-web-case-pages-green1.log` | 2026-11-05 00:53:29, exit 1; 43 tests, 7 failed / 36 passed, 43.20 s | App 22 passed. Seven Case test selectors expected standalone business text while the page combined labeled fields. Positive and old-value absence selectors now match actual business content. |
+| `/tmp/tianji-web-case-pages-typecheck1.log`, `lint1.log` | Typecheck exit 0; lint exit 1 | Removed redundant synchronous lookup `setReading(false)` from effect; keyed lookup already initializes false. No lint suppression/config change. |
+| `/tmp/tianji-web-case-pages-green2.log` | 00:56:31, exit 1; 43 tests, one timeout / 42 passed, 51.71 s | Only the five-row fact/action test exceeded the default 5 s; no assertion failure. Typecheck2/lint2 passed. |
+| `/tmp/tianji-web-case-pages-facts-isolated.log` | 00:58:36, exit 1; one selected timeout, 20 not selected, 16.15 s | Reproduced expensive repeated accessibility scans in jsdom. Root kept timeout unchanged and scoped exact text to each native button; unsupported/milestone absence checks inspect DOM, retaining or strengthening coverage. |
+| `/tmp/tianji-web-case-pages-facts-isolated2.log` | 00:59:56, exit 0; one selected pass, 20 not selected, 1.90 s (test 304 ms) | Optimized assertions pass. New Timeline uses current AntD `content` rather than deprecated `children`; facts/clock semantics unchanged. |
+| `/tmp/tianji-web-case-pages-green3.log` | 01:01:11, exit 0; 2 files / 43 tests passed, 36.01 s | Full focused gate with no skipped case. |
+| `/tmp/tianji-web-case-pages-typecheck3.log`, `lint3.log` | Both exit 0 | Final TypeScript/ESLint gates. |
+| `/tmp/tianji-web-case-pages-regression.log` | 01:02:28, exit 0; 22 files / 203 tests passed, 83.78 s | Final complete frontend regression; existing jsdom pseudo-element diagnostics remain. |
+| `/tmp/tianji-web-case-pages-build.log` | Official Plan §8 PAC build exit 0 | Official preparation/manifest validation/TypeScript/Vite/artifact proof pass; existing large-chunk warning retained without changing limits/scripts. |
+
+The generated manifest, report and dist build record were opened and SDK `manifestDigests` independently recomputed matching values:
+
+| Artifact field | Verified value |
+| --- | --- |
+| Build ID | `local-ff8af799-8d81-490e-9556-62ecfa7ea68c` |
+| Artifact digest | `0ad80d41ad1af4e5551edaaebea648246845e3ba5a99312205fd483db95f96f0` |
+| Manifest digest | `0659f8fed47f9de63473c9236a8033f7d1fb75e2bdd079f77ae2d33e20d6ee2a` |
+| Policy digest | `d9b616bb650137209e99bd6057f154391c85ec55db96f83c2f4011ead980a3c5` |
+| Metadata digest | `8bc5bbf2903b501efa83218cb60de648bae7c425c52c6eca1736acb077531d73` |
+| Source digest | `2edbbff015cf1789833d4fff4427529b0ceb0a4c82879e6edfd909f53ba53413` |
+| Source metadata | Baseline `78bbcb31e05c7eeaddd013419d1cd6210eb10fe1`; LOCAL_UNCOMMITTED, workingTreeChanged=true |
+| Final counts | 25 resources, 12 permission references, 23 CALLS; four new Case keys, only `case.get` and `case.actPlanItem` references |
+
+This is a precommit local artifact, not a clean release, catalog registration/activation or grant. Exact changes equal the ten authorized paths; **69 excluded baseline tracked files match their original SHA-256**, including all prior API/State/fixture/task-page/lock/Spec/Plan bytes. Service and SDK repositories remain clean at their recorded baselines. No new repository scratch harness or build/dependency/configuration layer was introduced; inline temporary verification commands require no `scripts/work` disposition.
+
+### Final Step 3 Manual Checks
+
+| Check ID | Applicability | Status | Evidence | Finding | Required action/exception |
+| --- | --- | --- | --- | --- | --- |
+| MC-ARCH-001 | Applicable | PASS | Existing pages/App/permissions; exact ten-path scope | Existing TS structure and backend boundaries preserved | None |
+| MC-REUSE-001 | Applicable | PASS | Committed casesApi/actionReducer/AuthContext/SDK/AntD/styles | Existing capabilities reused; no provider/cache/framework | None |
+| MC-DEP-001 | Applicable | PASS | Package/lock/scripts excluded hashes; official build | Zero new dependency or build step | None |
+| MC-NAME-001 | Not applicable | N/A | TS/Markdown only, no Java types | Plan component/resource names preserved | None |
+| MC-VALID-001 | Applicable | PASS | Exact Java-compatible lookup validation; finite-action/permission/source tests | Local IDs, source/version and current permission checked | None |
+| MC-MODEL-001 | Not applicable | N/A | Readonly TS snapshots/envelopes; nested action arrays cloned/frozen | No Java POJO/Lombok changes | None |
+| MC-CONVERT-001 | Not applicable | N/A | Direct existing typed API/React values | No Java converter/mapper changes | None |
+| MC-LOG-001 | Not applicable | N/A | No Java class/new log; fixed UI errors and plain text | No raw body/form/token logging | None |
+| MC-BEAN-001 | Not applicable | N/A | Backend/DI files untouched | No Spring wiring change | None |
+| MC-UTIL-001 | Not applicable | N/A | Existing TS/native APIs only | No Java utility/dependency change | None |
+| MC-JSON-001 | Applicable | PASS | Existing strict Case API unchanged; frozen exact command/source and four actions | No extra actor/source fields in body; no invented API | None |
+| MC-TIME-001 | Applicable | PASS | Explicit UTC/h23 and raw time fields; separate receipt order | Only actual instants displayed; no invented PI history/chronology | None |
+| MC-CONFIG-001 | Not applicable | N/A | No env/profile key change; lock/build scripts frozen | Existing configuration preserved | None |
+| MC-PATTERN-001 | Applicable | PASS | Operation envelope + committed pure State + page-owned effects | Approved exact-command protocol reused | None |
+| MC-SCOPE-001 | Applicable | PASS | Exact ten paths, 69 excluded SHA matches; no backend/DDL edits | Scope preserved across all three steps | None |
+| MC-TEST-001 | Applicable | PASS | Actual RED; 43 focused/203 full GREEN; typecheck/lint/PAC | Required finite gates pass; runtime separate | None |
+| MC-BLOCKER-001 | Applicable | PASS | Independent source review and all preceding rows | No unresolved source blocker in frontend slice | None |
+
+### Final Step 3 Literal Rule Gate
+
+| Literal rule | Applicability | Status | Diff/path evidence | Validation evidence | Finding | Required action/exception |
+| --- | --- | --- | --- | --- | --- | --- |
+| Rule 1 | Not applicable | N/A | TS/Markdown only | Exact path/typecheck | No Java naming change | None |
+| Rule 2 | Not applicable | N/A | No Java handoff; local ID/current permission and existing API checks | Case negative/source/permission tests | Java Validation contract unchanged | None |
+| Rule 3 | Not applicable | N/A | Readonly cloned/frozen Case/PI/action envelope | Same-reference retry/typecheck tests | No Java POJO/Lombok/mapper changes | None |
+| Rule 4 | Not applicable | N/A | No Spring/Java business logging target | Excluded hashes | Java wiring unchanged | None |
+| Rule 5 | Not applicable | N/A | Existing TS/native/AntD only | Import/dependency scope | No Java utility/dependency change | None |
+| Rule 6 | Not applicable | N/A | Existing strict API/Jackson wire untouched | API regression and Case command UI tests | Java serialization unchanged | None |
+| Rule 7 | Not applicable | N/A | No Spring profiles/frontend env keys | Excluded configuration hashes | Existing keys preserved | None |
+| Rule 9 | Applicable | PASS | Frozen Operation + pure State + explicit read/write effects | Unknown/retry/rejection/late-response tests | Approved State pattern applied | None |
+| Rule 10 | Not applicable | N/A | No Java time target; raw TS instant strings | UTC/raw/sparse-terminal tests | Java time unchanged | None |
+| Rule 11 | Applicable | PASS | Existing frontend structure/SDK reuse; no backend persistence/Event layer | Exact scope/typecheck/lint/build | Existing architecture preserved | None |
+
+### Final effective-Spec source conformance
+
+The exact frozen Spec/Plan hashes above remain unchanged. Root and independent review compared actual source and assertions, not only the Plan matrix. Commit boundaries are Step 1 `e4a10d9eac4e837a5eed9459f3a93cda06d84276`, Step 2 `78bbcb31e05c7eeaddd013419d1cd6210eb10fe1`, and the focused commit owning this Step 3 section. No later step source started before the preceding commit.
+
+| Requirement | Source status | Implementation and actual finite proof |
+| --- | --- | --- |
+| REQ-501 | Satisfied | App/resources plus App tests: task-only/Case-only admission, four ordered landing choices, direct route/menu/action guards. |
+| REQ-502 | Satisfied | Strict task page decoder and Inbox: PROCESS/CASE, three current-visible selections, filters/reset, cursor stack, empty continuation. |
+| REQ-503 | Satisfied | Task API source/receipt affinity plus Detail flags/resources, claim/unclaim/released-lane transfer and server-authority messaging. |
+| REQ-504 | Satisfied | Schema/form API bounds plus indexed Form mapping: exact fields, empty form/string, explicit approval true/false, integer/Unicode/prototype tests. |
+| REQ-505 | Satisfied | Strict Case decoder plus known-ID get/current facts, real submitted/finished UTC timeline, sparse/empty terminal and explicit no-history wording. |
+| REQ-506 | Satisfied | Four API transitions and UI ACTIVE/server-list/permission intersection; milestone/terminal no actions, per-item TERMINATE warning, no COMPLETE. |
+| REQ-507 | Satisfied | Pure State and both Detail pages: frozen one UUID/version/body/source, synchronous write refs, exact manual retry, no auto replay. |
+| REQ-508 | Satisfied | Both Detail tests: 408/429/network/malformed/5xx unknown; definitive 4xx clears facts; accepted receipt/current-read failure separated; 404 not invented completion. |
+| REQ-509 | Satisfied | Identity/epoch/route/resource/filter frame keys, AbortControllers/sequences, late-read/write and callback-time permission cases. |
+| REQ-510 | Satisfied (source/static boundary) | Real REDs, Step focused 19/92/43, final 22 files/203 PASS, typecheck/lint, official local PAC artifact, strict docs, exact scope and explicit runtime limits. |
+
+Non-goals pass: no backend/DB/Flyway/dependency/auth/environment/global-style/registry/build-script changes; no administrator task query, Case start/list/history, approval verify, browser service token, provider/store/cache or modeler. No repository scratch harness remains undetermined.
+
+**Source implementation: complete for this T3-11 slice. Runtime acceptance verdict: PARTIAL — required runtime acceptance unverified.** Real gateway/CSRF, IAM/catalog activation/grants, feature configuration, browser behavior, applicant/approver enforcement, actual task progression and native Case→BPMN/Timer/PostgreSQL S08/S09 remain unexecuted. These results do not mark the whole original roadmap or MVP complete.
 
 ## Live acceptance boundary
 
