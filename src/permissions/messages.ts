@@ -15,4 +15,11 @@ export const messages = defineMessages([
   {pageCode: 'tianji.web.permissions', key: 'button.memoryCompare', defaultLocale: 'zh-CN', defaults: {'zh-CN': '比较记忆条目', 'en-US': 'Compare memory entries'}},
   {pageCode: 'tianji.web.permissions', key: 'button.preferenceIntentStatus', defaultLocale: 'zh-CN', defaults: {'zh-CN': '查询偏好提取状态', 'en-US': 'Read preference extraction progress'}},
   {pageCode: 'tianji.web.permissions', key: 'button.cancelPreferenceIntent', defaultLocale: 'zh-CN', defaults: {'zh-CN': '停止后续偏好提取', 'en-US': 'Stop pending preference extraction'}},
+  {pageCode: 'tianji.web.permissions', key: 'page.taskInbox', defaultLocale: 'zh-CN', defaults: {'zh-CN': '任务箱', 'en-US': 'Task inbox'}},
+  {pageCode: 'tianji.web.permissions', key: 'page.taskDetail', defaultLocale: 'zh-CN', defaults: {'zh-CN': '任务详情', 'en-US': 'Task details'}},
+  {pageCode: 'tianji.web.permissions', key: 'menu.tasks', defaultLocale: 'zh-CN', defaults: {'zh-CN': '任务箱', 'en-US': 'Task inbox'}},
+  {pageCode: 'tianji.web.permissions', key: 'button.taskClaim', defaultLocale: 'zh-CN', defaults: {'zh-CN': '认领任务', 'en-US': 'Claim task'}},
+  {pageCode: 'tianji.web.permissions', key: 'button.taskUnclaim', defaultLocale: 'zh-CN', defaults: {'zh-CN': '归还任务', 'en-US': 'Return task'}},
+  {pageCode: 'tianji.web.permissions', key: 'button.taskTransfer', defaultLocale: 'zh-CN', defaults: {'zh-CN': '转交任务', 'en-US': 'Transfer task'}},
+  {pageCode: 'tianji.web.permissions', key: 'button.taskComplete', defaultLocale: 'zh-CN', defaults: {'zh-CN': '完成任务', 'en-US': 'Complete task'}},
 ] as const)

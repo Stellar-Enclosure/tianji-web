@@ -2,7 +2,7 @@
 
 The source scope is T3-11 of the original agent framework roadmap. The reviewed [Spec](../spec/2026-11-04-22-56-task-case-approval-web.md) and [Plan](../plan/2026-11-04-23-14-task-case-approval-web.md) remain `Review`; implementation proceeds under the user's original continuation instruction and Root's complete design review. This document records local source validation separately from live acceptance.
 
-## Step 40 / Plan Step 1 — Verified for focused commit
+## Step 40 / Plan Step 1 — Committed
 
 - Baseline: clean `tianji-web main@14f89aaaedad21d650481f14e5496bbf5debfc68`, 59 tracked files frozen in `/tmp/tianji-web-step40-baseline.json`.
 - Spec SHA-256: `14c997cb92e3ad035f14ba9fa237d373597e0c93bb5da5803266fc259e1df07c`.
@@ -98,6 +98,86 @@ These are precommit local validation artifacts, not an exact clean-release claim
 | Rule 11 | Applicable | PASS | Existing api/pages/test structure and requestJson/SDK reuse | Typecheck/lint/build, exact scope and clean backend/SDK | Existing architecture preserved; no new persistence/Event layer | None |
 
 Step 1 is verified for its single focused commit. Step 2/3 routes, forms, page effects and permissions remain unimplemented at this point; no later step source was started. The final Spec conformance audit belongs to Step 3.
+
+## Step 41 / Plan Step 2 — Verified for focused commit
+
+Step 40 was committed as `e4a10d9eac4e837a5eed9459f3a93cda06d84276` with the exact 12 reviewed paths and a clean worktree before any Step 2 edit. The new baseline freezes all 70 tracked files in `/tmp/tianji-web-step41-baseline.json`; the exact 14 authorized paths are `/tmp/tianji-web-step41-paths.json`. All 17 Manual Check obligations and ten original Rule rows were copied into `/tmp/tianji-web-step41-lock.json`; Java-only concerns remain evidence-backed N/A, Rule 9 and Rule 11 remain applicable. Final verdicts require this step's completed diff and gates.
+
+Root owns App/tests, four permission entrypoints, README and evidence. The page worker owns only the six new task page/form/test files. Existing API/fixture/State files, artifact lock, frozen Spec/Plan, auth, dependencies, scripts and styles are excluded from Step 2. No Case page or Step 3 source is authorized before this step's commit.
+
+- App route/resource RED: `npm test -- src/App.test.tsx`, 2026-11-05 00:00:28 Asia/Shanghai, exit 1; 13 tests, 9 expected failures / 4 passed, 4.94 s. Log `/tmp/tianji-web-task-pages-app-red.log`. Missing task app/page/menu/button resources and direct routes, plus the missing no-accessible-page landing, produce genuine assertions/missing-content failures. Original run/memory ordered landing cases pass. No fixture/import/TypeScript/environment failure was observed. The existing Alert `message` deprecation appears on the old denied landing path and is not counted as RED.
+- Component RED: the three declared page/form selectors ran in their three test files at 2026-11-05 00:08:32, exit 1; 3 genuine missing-content assertion failures, 70 tests not selected, 4.44 s. Log `/tmp/tianji-web-task-pages-components-red.log`. All three components still returned null at that point; no import/fixture/environment error. Root authorized B only after this observation. This selected RED does not claim the other 70 tests passed; the full focused gate remains required after implementation.
+
+### Step 2 actual implementation and gates
+
+Task inbox/detail/schema form, guarded task routes, ordered run/memory/task landing, task-only app admission, seven owned UI resources, four permission references, six API CALLS and matching zh-CN/en-US metadata are implemented. Existing APIs, State module, auth, package files, environment keys and styles remain unchanged. The pages use full identity/resource/query keys, bounded cursor navigation, page-owned abort/sequence checks and current permission checks. Detail freezes one command/source envelope, uses a synchronous write fence, treats 408/429/network/invalid-success/5xx as unknown, and distinguishes historical acceptance from successor current-state reads. Schema fields use indexed Ant Form names and exact-key projection, preserving explicit false and valid prototype-shaped names.
+
+| Gate/log | Actual result | Classification and corrective action |
+| --- | --- | --- |
+| `/tmp/tianji-web-task-pages-green1.log` | 2026-11-05 00:17:48, exit 1; 86 tests, 20 failed / 66 passed, 27.46 s | App 13 and schema 25 passed. Remaining failures included Ant two-character button spacing and queued mock-once isolation; tests now match the semantic refresh name and reset mocks before reinstalling defaults. No weakened permission/race assertion. |
+| `/tmp/tianji-web-task-pages-typecheck1.log`, `lint1.log` | Typecheck exit 0; lint exit 1 with two errors | Initial load called a state-setting function directly in an effect; moved to an active-guarded microtask. ASCII trim's control-range regex became equivalent character-code loops. No lint suppression/config change. |
+| `/tmp/tianji-web-task-pages-scope-red.log` | 00:29:10, exit 1; 3 selected failures, 12 not selected, 5.59 s | Genuine field-feedback RED for Java-blank U+1680, internal NUL and an unpaired surrogate before validator implementation. |
+| `/tmp/tianji-web-task-pages-green2.log` | 00:30:13, exit 1; 92 tests, 3 failed / 89 passed, 20.24 s | Only new feedback visibility assertions observed Ant's enter animation at opacity 0. Tests now await actual visibility; the no-additional-query assertion remains. Typecheck2/lint2 exited 0. |
+| `/tmp/tianji-web-task-pages-green3.log` | 00:32:07, exit 0; 4 files / 92 tests passed, 20.25 s | Final full focused gate, no selected/skipped case. Includes three invalid scope cases plus valid NBSP/BOM and approved ASCII normalization. |
+| `/tmp/tianji-web-task-pages-typecheck3.log`, `lint3.log` | Both exit 0 | Final TypeScript and ESLint gates. |
+| `/tmp/tianji-web-task-pages-regression.log` | 00:33:00, exit 0; 21 files / 173 tests passed, 50.47 s | Original Step 1/Agent/Memory/Auth regression plus task components/routes. Existing jsdom pseudo-element diagnostics remain. |
+| `/tmp/tianji-web-task-pages-build.log` | Official Plan §8 PAC build exit 0 | Preparation, validation, TypeScript, Vite and embedded artifact proof passed. Existing large-chunk warning remains; no build/script/limit changes. |
+
+Root corrected the task-follow-up dispatch oversight and took ownership of the six page/test files for the small evidenced fixes. The original worker's B implementation was preserved; no unrelated edit was reverted. Independent final source review found no remaining actionable finding after the scope validator and effect/fixture repairs.
+
+The actual generated manifest/report and dist build record were opened, and SDK `manifestDigests` recomputation matched all three:
+
+| Artifact field | Verified value |
+| --- | --- |
+| Build ID | `local-f18e3417-ab57-4ea9-898d-b473cdde0298` |
+| Artifact digest | `11526a9803e943c5792f3a936e9ff527b4d58a5080953991497101b371a5cce0` |
+| Manifest digest | `475213d039355a8f79928cac45061639ed21380341de16ba9ffa9f1621a19963` |
+| Policy digest | `0811021e69accfd080c0e2a07681516fccc124423f78b997bc0309619c8d55f5` |
+| Metadata digest | `261f04c853e3f10e3625f8e948c9599e4aec49a8459513eb1d055676abbb69be` |
+| Source digest | `d5d281625e11da77d0631eec723d427ebc0ae7888da41809a88383fdbb4cf220` |
+| Source metadata | Baseline `e4a10d9eac4e837a5eed9459f3a93cda06d84276`; LOCAL_UNCOMMITTED, workingTreeChanged=true |
+| Counts | 21 resources, 10 permission references, 21 CALLS; exactly seven new task UI keys and six task API references; no new Case API reference |
+
+This is a local precommit validation artifact, not a clean release or permission activation. Exact changed/new paths equal all 14 authorized paths; all **63 excluded baseline tracked files match their original SHA-256**, including the complete committed Step 1 API/State/fixtures, official lock and frozen Spec/Plan. Case page Step 3 has not started.
+
+### Final Step 2 Manual Checks
+
+| Check ID | Applicability | Status | Evidence | Finding | Required action/exception |
+| --- | --- | --- | --- | --- | --- |
+| MC-ARCH-001 | Applicable | PASS | New pages/form in existing pages; App/router and four existing entrypoints | Existing TS structure preserved; no backend layer | None |
+| MC-REUSE-001 | Applicable | PASS | Existing typed API/State, AuthContext, AntD, CSS classes and SDK registry | No alternate transport/provider/schema framework | None |
+| MC-DEP-001 | Applicable | PASS | Package/lock/scripts/SDK excluded SHA checks; official build | Zero dependency/build-tool change | None |
+| MC-NAME-001 | Not applicable | N/A | Exact TS/Markdown inventory; no Java file | Java naming scope absent; Plan component names retained | None |
+| MC-VALID-001 | Applicable | PASS | Scope field RED/Unicode positives; 92 focused form/command/source tests | Field/schema/primitive boundaries and callback permissions enforced | None |
+| MC-MODEL-001 | Not applicable | N/A | Readonly TS Operation envelope/source/form; no Java target | No Java carrier/Lombok change | None |
+| MC-CONVERT-001 | Not applicable | N/A | Safe indexed Form entries project to existing TS API types | No Java mapper/converter change | None |
+| MC-LOG-001 | Not applicable | N/A | No Java business class; fixed UI errors and plain React values | No new sensitive-data logging | None |
+| MC-BEAN-001 | Not applicable | N/A | Backend/DI files excluded | No Spring Bean/qualifier/injection change | None |
+| MC-UTIL-001 | Not applicable | N/A | Native TS/DOM/Intl helpers and existing libraries only | No Java utility/new package | None |
+| MC-JSON-001 | Applicable | PASS | Frozen exact commands/proto-safe form and source; existing strict API unchanged | No caller actor/role/extra variable fields | None |
+| MC-TIME-001 | Applicable | PASS | Explicit UTC/h23 Intl and raw time attributes; old due-date tests | No browser-zone authority or inferred terminal state | None |
+| MC-CONFIG-001 | Not applicable | N/A | No env/profile key change; lock/scripts frozen | Existing service/frontend configuration preserved | None |
+| MC-PATTERN-001 | Applicable | PASS | Detail uses committed State reducer and frozen Operation union | Complex unknown-result protocol reuses approved pattern | None |
+| MC-SCOPE-001 | Applicable | PASS | Exact 14 paths and 63 excluded SHA matches; no Case page | Step 2 scope preserved | None |
+| MC-TEST-001 | Applicable | PASS | App/component/scope RED; 92 focused/173 full GREEN; static/PAC | Required finite checks pass; runtime separate | None |
+| MC-BLOCKER-001 | Applicable | PASS | Independent final review and preceding 16 rows | No unresolved Step 2 source blocker | None |
+
+### Final Step 2 Literal Rule Gate
+
+| Literal rule | Applicability | Status | Diff/path evidence | Validation evidence | Finding | Required action/exception |
+| --- | --- | --- | --- | --- | --- | --- |
+| Rule 1 | Not applicable | N/A | TS components/resources/docs only | Exact path/typecheck | No Java type naming change | None |
+| Rule 2 | Not applicable | N/A | No Java handoff; local form and existing typed API boundaries | Scope/form/source/permission cases | Java Validation contract unchanged | None |
+| Rule 3 | Not applicable | N/A | Readonly TS values/prototype-safe projection | Typecheck, freeze/explicit-false/proto tests | No Java POJO/Lombok/MapStruct change | None |
+| Rule 4 | Not applicable | N/A | No Spring or Java logging/DI target | Excluded hashes | Java wiring unchanged | None |
+| Rule 5 | Not applicable | N/A | Existing TS libraries/native helpers | Dependency/import/scope check | No Java utility/dependency change | None |
+| Rule 6 | Not applicable | N/A | Existing API/Jackson wire unchanged | Existing API regression plus exact command UI tests | Java JSON contract unchanged | None |
+| Rule 7 | Not applicable | N/A | No Spring profiles or frontend env keys | Excluded configuration hashes | Configuration structure preserved | None |
+| Rule 9 | Applicable | PASS | Frozen Operation + pure reducer + page-owned read/write effects | Unknown retry, double click, rejection and successor-read tests | Approved State pattern applied | None |
+| Rule 10 | Not applicable | N/A | No Java time target; explicit TS UTC display | TIME-501/raw timestamp/old due-date tests | Java time unchanged | None |
+| Rule 11 | Applicable | PASS | Existing pages/App/auth/permissions; committed API/State reuse | Typecheck/lint/build and exact scope | Existing architecture preserved | None |
+
+Step 2 is verified for its single focused commit. Step 3 Case lookup/actions and final ten-requirement source conformance remain pending. Actual gateway/IAM/task progression and browser acceptance remain RuntimeUnverified.
 
 ## Live acceptance boundary
 

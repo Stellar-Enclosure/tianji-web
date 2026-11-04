@@ -1,9 +1,9 @@
 import {defineResources} from '@stellar-enclosure/stellar-enclosure-web-shared/permissions'
-import {CANCEL, READ, START, MEMORY_READ, MEMORY_WRITE, MEMORY_FORGET} from './permissions'
+import {CANCEL, READ, START, MEMORY_READ, MEMORY_WRITE, MEMORY_FORGET, TASK_READ, TASK_CLAIM, TASK_COMPLETE, TASK_TRANSFER} from './permissions'
 
 export const resources = defineResources([
   {key: 'tianji.app.console', type: 'APP', target: {applicationCode: 'tianji'},
-    requirement: {mode: 'ANY', codes: [READ, MEMORY_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'app.console'}},
+    requirement: {mode: 'ANY', codes: [READ, MEMORY_READ, TASK_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'app.console'}},
   {key: 'tianji.page.runs', type: 'PAGE', target: {route: '/runs'},
     requirement: {mode: 'ALL', codes: [READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.runs'}},
   {key: 'tianji.page.runDetail', type: 'PAGE', target: {route: '/runs/:runId'},
@@ -30,4 +30,18 @@ export const resources = defineResources([
     requirement: {mode: 'ALL', codes: [READ, MEMORY_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.preferenceIntentStatus'}},
   {key: 'tianji.button.runDetail.cancelPreferenceIntent', type: 'BUTTON', target: {component: 'src/pages/MemoryPreferenceIntentStatus.tsx', action: 'cancelPreferenceIntent'},
     requirement: {mode: 'ALL', codes: [READ, MEMORY_READ, MEMORY_FORGET]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.cancelPreferenceIntent'}},
+  {key: 'tianji.page.taskInbox', type: 'PAGE', target: {route: '/tasks'},
+    requirement: {mode: 'ALL', codes: [TASK_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.taskInbox'}},
+  {key: 'tianji.page.taskDetail', type: 'PAGE', target: {route: '/tasks/:taskId'},
+    requirement: {mode: 'ALL', codes: [TASK_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.taskDetail'}},
+  {key: 'tianji.menu.tasks', type: 'MENU', target: {route: '/tasks', parentKey: 'tianji.app.console'},
+    requirement: {mode: 'ALL', codes: [TASK_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.tasks'}},
+  {key: 'tianji.button.taskDetail.claim', type: 'BUTTON', target: {component: 'src/pages/TaskDetailPage.tsx', action: 'claim'},
+    requirement: {mode: 'ALL', codes: [TASK_READ, TASK_CLAIM]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.taskClaim'}},
+  {key: 'tianji.button.taskDetail.unclaim', type: 'BUTTON', target: {component: 'src/pages/TaskDetailPage.tsx', action: 'unclaim'},
+    requirement: {mode: 'ALL', codes: [TASK_READ, TASK_CLAIM]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.taskUnclaim'}},
+  {key: 'tianji.button.taskDetail.transfer', type: 'BUTTON', target: {component: 'src/pages/TaskDetailPage.tsx', action: 'transfer'},
+    requirement: {mode: 'ALL', codes: [TASK_READ, TASK_TRANSFER]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.taskTransfer'}},
+  {key: 'tianji.button.taskDetail.complete', type: 'BUTTON', target: {component: 'src/pages/TaskDetailPage.tsx', action: 'complete'},
+    requirement: {mode: 'ALL', codes: [TASK_READ, TASK_COMPLETE]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.taskComplete'}},
 ] as const)

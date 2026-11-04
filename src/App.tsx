@@ -1,4 +1,4 @@
-import {AppstoreOutlined, AuditOutlined, LogoutOutlined} from '@ant-design/icons'
+import {AppstoreOutlined, AuditOutlined, InboxOutlined, LogoutOutlined} from '@ant-design/icons'
 import {EnterpriseLayout, type EnterpriseLayoutConfig} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Result, Spin, Tag} from 'antd'
 import type {ReactNode} from 'react'
@@ -7,6 +7,8 @@ import {AuthProvider, useAuth} from './auth/AuthContext'
 import AgentRunDetailPage from './pages/AgentRunDetailPage'
 import AgentRunsPage from './pages/AgentRunsPage'
 import MemoryCandidatesPage from './pages/MemoryCandidatesPage'
+import TaskDetailPage from './pages/TaskDetailPage'
+import TaskInboxPage from './pages/TaskInboxPage'
 
 const configuredBase: string = import.meta.env.VITE_BASE_PATH ?? '/'
 if (!configuredBase.startsWith('/') || configuredBase.startsWith('//') || /[\\?#%]/.test(configuredBase)
@@ -30,12 +32,16 @@ function SessionRoutes() {
           : <Button type="primary" onClick={() => void retry()}>重新验证</Button>} />
     </Card></main>
   }
+  const landing = ([['tianji.page.runs', '/runs'], ['tianji.page.memoryCandidates', '/memory'], ['tianji.page.taskInbox', '/tasks']] as const)
+    .find(([resource]) => allows(resource))?.[1]
   return <Routes>
     <Route element={<Shell />}>
-      <Route index element={<Navigate to={allows('tianji.page.runs') ? '/runs' : '/memory'} replace />} />
+      <Route index element={landing ? <Navigate to={landing} replace /> : <Result status="403" title="没有可访问的页面" />} />
       <Route path="/runs" element={<RequireResource resource="tianji.page.runs"><AgentRunsPage /></RequireResource>} />
       <Route path="/runs/:runId" element={<RequireResource resource="tianji.page.runDetail"><AgentRunDetailPage /></RequireResource>} />
       <Route path="/memory" element={<RequireResource resource="tianji.page.memoryCandidates"><MemoryCandidatesPage /></RequireResource>} />
+      <Route path="/tasks" element={<RequireResource resource="tianji.page.taskInbox"><TaskInboxPage /></RequireResource>} />
+      <Route path="/tasks/:taskId" element={<RequireResource resource="tianji.page.taskDetail"><TaskDetailPage /></RequireResource>} />
       <Route path="*" element={<Result status="404" title="页面不存在" />} />
     </Route>
   </Routes>
@@ -55,6 +61,7 @@ function Shell() {
     navigation: [
       ...(allows('tianji.menu.runs') ? [{key: 'runs', label: '运行记录', path: '/runs', activePathPrefixes: ['/runs'], icon: <AppstoreOutlined />}] : []),
       ...(allows('tianji.menu.memoryCandidates') ? [{key: 'memory', label: '候选记忆', path: '/memory', activePathPrefixes: ['/memory'], icon: <AuditOutlined />}] : []),
+      ...(allows('tianji.menu.tasks') ? [{key: 'tasks', label: '任务箱', path: '/tasks', activePathPrefixes: ['/tasks'], icon: <InboxOutlined />}] : []),
     ],
     actions: <Tag color="success">会话已验证</Tag>,
     user: {name: authorization.identity.subject, description: `租户 ${authorization.identity.tenantId}`,
