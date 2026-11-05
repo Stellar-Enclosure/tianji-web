@@ -7,6 +7,7 @@ import {processAgentOutcomesApi, type ProcessAgentOutcome, type ProcessAgentOutc
 import {processCorrelationsApi, type ProcessCorrelationPage, type ProcessInstanceSnapshot} from '../api/processCorrelations'
 import {processMigrationPreflightApi, type ProcessMigrationPreflight} from '../api/processMigrationPreflight'
 import {processReleasesApi} from '../api/processReleases'
+import {processStartReceiptsApi, type ProcessStartReceipt} from '../api/processStartReceipts'
 import {useAuth} from '../auth/AuthContext'
 import {authorization, run} from '../test/fixtures'
 import ExecutionTimelinePage from './ExecutionTimelinePage'
@@ -15,6 +16,10 @@ vi.mock('../auth/AuthContext', () => ({useAuth: vi.fn()}))
 vi.mock('../api/agent', () => ({agentApi: {listByCorrelation: vi.fn()}}))
 vi.mock('../api/processAgentOutcomes', () => ({processAgentOutcomesApi: {list: vi.fn()}}))
 vi.mock('../api/processMigrationPreflight', () => ({processMigrationPreflightApi: {get: vi.fn()}}))
+vi.mock('../api/processStartReceipts', async original => {
+  const actual = await original<typeof import('../api/processStartReceipts')>()
+  return {...actual, processStartReceiptsApi: {get: vi.fn()}}
+})
 vi.mock('../api/processReleases', async original => {
   const actual = await original<typeof import('../api/processReleases')>()
   return {...actual, processReleasesApi: {get: vi.fn()}}
@@ -85,6 +90,69 @@ describe('Process correlation page', () => {
     vi.mocked(processCorrelationsApi.list).mockImplementation(async (_, query) => page(query.correlationId))
     vi.mocked(agentApi.listByCorrelation).mockResolvedValue(agentPage())
     vi.mocked(processAgentOutcomesApi.list).mockImplementation(async (_, instanceId) => outcomePage(instanceId))
+  })
+
+  it('offers an explicit START receipt lookup without reading on entry', () => {
+    render(<ExecutionTimelinePage />)
+    expect(screen.queryByLabelText('START 命令标识')).not.toBeNull()
+    expect(screen.getByLabelText('原请求 SHA-256')).toHaveValue('')
+    expect(processStartReceiptsApi.get).not.toHaveBeenCalled()
+    expect(processCorrelationsApi.list).not.toHaveBeenCalled()
+  })
+
+  it('queries one current owner START receipt from an independently supplied digest', async () => {
+    vi.mocked(processStartReceiptsApi.get).mockResolvedValueOnce({
+      instanceId: 'owned-start-instance', status: 'APPLIED', recordedAt: '2026-11-05T10:20:30.123456Z',
+    })
+    render(<ExecutionTimelinePage />)
+    edit('START 命令标识', 'intent:abc-01')
+    edit('原请求 SHA-256', 'A'.repeat(64))
+    fireEvent.click(screen.getByRole('button', {name: '查询 START 回执'}))
+    expect(screen.getByText('请输入有效的 START 命令标识和 64 位小写 SHA-256。')).toBeInTheDocument()
+    expect(processStartReceiptsApi.get).not.toHaveBeenCalled()
+    edit('原请求 SHA-256', 'a'.repeat(64))
+    expect(processStartReceiptsApi.get).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', {name: '查询 START 回执'}))
+    expect(await screen.findByText('来源：Process 已应用 START 回执')).toBeInTheDocument()
+    expect(screen.getByText('回执实例标识：owned-start-instance')).toBeInTheDocument()
+    expect(screen.getByText('2026-11-05T10:20:30.123456Z UTC')).toBeInTheDocument()
+    expect(processStartReceiptsApi.get).toHaveBeenCalledExactlyOnceWith('20',
+      {commandId: 'intent:abc-01', requestSha256: 'a'.repeat(64)}, expect.any(AbortSignal))
+    expect(processCorrelationsApi.list).not.toHaveBeenCalled()
+    expect(processCorrelationsApi.detail).not.toHaveBeenCalled()
+  })
+
+  it('keeps a missing START receipt as an unknown execution result', async () => {
+    vi.mocked(processStartReceiptsApi.get).mockRejectedValueOnce(new ApiError('private diagnostic', 404, 'TIANJI_RESOURCE_NOT_FOUND'))
+    render(<ExecutionTimelinePage />)
+    edit('START 命令标识', 'intent:abc-01')
+    edit('原请求 SHA-256', 'a'.repeat(64))
+    fireEvent.click(screen.getByRole('button', {name: '查询 START 回执'}))
+    expect(await screen.findByText('未观察到匹配的已应用 START 回执。')).toBeInTheDocument()
+    expect(screen.getByText('原请求的执行结果仍未知。')).toBeInTheDocument()
+    expect(screen.queryByText('private diagnostic')).not.toBeInTheDocument()
+    expect(screen.queryByText('来源：Process 已应用 START 回执')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: /重试启动|重新执行|启动流程/})).not.toBeInTheDocument()
+  })
+
+  it.each(['edit', 'epoch', 'permission'] as const)('discards a pending START receipt after %s', async change => {
+    let resolve!: (value: ProcessStartReceipt) => void
+    vi.mocked(processStartReceiptsApi.get).mockReturnValueOnce(new Promise(value => { resolve = value }))
+    const {rerender} = render(<ExecutionTimelinePage />)
+    edit('START 命令标识', 'intent:abc-01')
+    edit('原请求 SHA-256', 'a'.repeat(64))
+    fireEvent.click(screen.getByRole('button', {name: '查询 START 回执'}))
+    const signal = vi.mocked(processStartReceiptsApi.get).mock.calls[0][2]
+    expect(screen.getByText('正在查询 START 回执')).toBeInTheDocument()
+    if (change === 'edit') edit('原请求 SHA-256', 'b'.repeat(64))
+    else {
+      current = change === 'epoch' ? auth('20', true, 42) : auth('20', false)
+      rerender(<ExecutionTimelinePage />)
+    }
+    expect(signal?.aborted).toBe(true)
+    await act(async () => { resolve({instanceId: 'stale-start-instance', status: 'APPLIED', recordedAt: '2026-11-05T10:20:30Z'}) })
+    expect(screen.queryByText('回执实例标识：stale-start-instance')).not.toBeInTheDocument()
+    expect(processStartReceiptsApi.get).toHaveBeenCalledTimes(1)
   })
 
   it('offers an explicit migration preflight only after current Process detail and release permission', async () => {

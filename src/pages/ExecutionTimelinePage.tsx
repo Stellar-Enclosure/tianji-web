@@ -1,11 +1,12 @@
 import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Form, Input, Space, Table, Typography, type TableColumnsType} from 'antd'
-import {useLayoutEffect, useRef, useState} from 'react'
+import {useLayoutEffect, useRef, useState, type FormEvent} from 'react'
 import {Link} from 'react-router-dom'
 import {agentApi, type AgentRun, type AgentRunPage} from '../api/agent'
 import {processAgentOutcomesApi, type ProcessAgentOutcome, type ProcessAgentOutcomePage} from '../api/processAgentOutcomes'
 import {processMigrationPreflightApi, type ProcessMigrationPreflight, type ProcessMigrationPreflightStatus, type ProcessMigrationTarget} from '../api/processMigrationPreflight'
 import {isProcessReleaseVersion, processReleasesApi} from '../api/processReleases'
+import {isProcessStartReceiptQuery, processStartReceiptsApi, type ProcessStartReceipt, type ProcessStartReceiptQuery} from '../api/processStartReceipts'
 import {isProcessCorrelationId, isProcessCorrelationQuery, isProcessCorrelationUtc, processCorrelationsApi,
   type ProcessCorrelationPage, type ProcessCorrelationQuery, type ProcessCorrelationReceipt,
   type ProcessInstanceSnapshot} from '../api/processCorrelations'
@@ -207,6 +208,7 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
         </Form.Item>
       </Form>
     </Card>
+    <ProcessStartReceiptLookup tenant={tenant} isCurrent={() => currentAllows.current(PAGE)} />
     {list.phase === 'loading' && <div role="status">正在查询流程关联回执</div>}
     {list.phase === 'error' && <Alert type="warning" showIcon title={list.message} />}
     {list.phase === 'page' && <Card variant="borderless" className="surface-card" title="流程启动回执">
@@ -245,6 +247,76 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
   </section>
 }
 
+
+type StartReceiptState = {phase: 'idle' | 'loading' | 'unobserved'}
+  | {phase: 'receipt'; receipt: ProcessStartReceipt}
+  | {phase: 'error'; message: string}
+
+function ProcessStartReceiptLookup({tenant, isCurrent}: {tenant: string; isCurrent: () => boolean}) {
+  const [query, setQuery] = useState<ProcessStartReceiptQuery>({commandId: '', requestSha256: ''})
+  const [state, setState] = useState<StartReceiptState>({phase: 'idle'})
+  const pending = useRef<AbortController | null>(null)
+
+  useLayoutEffect(() => () => {
+    pending.current?.abort()
+    pending.current = null
+  }, [])
+
+  const edit = (name: keyof ProcessStartReceiptQuery, value: string) => {
+    pending.current?.abort()
+    pending.current = null
+    setQuery(previous => ({...previous, [name]: value}))
+    setState({phase: 'idle'})
+  }
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (pending.current || !isCurrent()) return
+    if (!isProcessStartReceiptQuery(query)) {
+      setState({phase: 'error', message: '请输入有效的 START 命令标识和 64 位小写 SHA-256。'})
+      return
+    }
+    const request = new AbortController()
+    pending.current = request
+    setState({phase: 'loading'})
+    const acceptsResult = () => pending.current === request && !request.signal.aborted && isCurrent()
+    try {
+      const receipt = await processStartReceiptsApi.get(tenant, query, request.signal)
+      if (acceptsResult()) setState({phase: 'receipt', receipt})
+    } catch (failure) {
+      if (!acceptsResult()) return
+      if (authFailed(failure)) setState({phase: 'idle'})
+      else if (failure instanceof ApiError && failure.status === 404) setState({phase: 'unobserved'})
+      else setState({phase: 'error', message: '当前无法查询 START 回执。'})
+    } finally {
+      if (pending.current === request) pending.current = null
+    }
+  }
+
+  return <Card title="核对 START 回执" variant="borderless" className="surface-card">
+    <form onSubmit={submit}>
+      <Space orientation="vertical" className="full-width">
+        <Typography.Text type="secondary">输入原 START 命令标识和已独立留存的请求摘要。</Typography.Text>
+        <label htmlFor="start-receipt-command">START 命令标识</label>
+        <Input id="start-receipt-command" autoComplete="off" maxLength={128} value={query.commandId}
+          onChange={event => edit('commandId', event.target.value)} />
+        <label htmlFor="start-receipt-digest">原请求 SHA-256</label>
+        <Input id="start-receipt-digest" autoComplete="off" maxLength={64} value={query.requestSha256}
+          onChange={event => edit('requestSha256', event.target.value)} />
+        <Button htmlType="submit" loading={state.phase === 'loading'} disabled={state.phase === 'loading'}>查询 START 回执</Button>
+        {state.phase === 'loading' && <span role="status">正在查询 START 回执</span>}
+        {state.phase === 'error' && <Alert type="warning" showIcon title={state.message} />}
+        {state.phase === 'unobserved' && <Alert type="info" showIcon title="未观察到匹配的已应用 START 回执。"
+          description="原请求的执行结果仍未知。" />}
+        {state.phase === 'receipt' && <>
+          <Typography.Text type="secondary">来源：Process 已应用 START 回执</Typography.Text>
+          <Typography.Text>回执实例标识：{state.receipt.instanceId}</Typography.Text>
+          <Typography.Text>回执记录时间：<UtcTime value={state.receipt.recordedAt} /></Typography.Text>
+        </>}
+      </Space>
+    </form>
+  </Card>
+}
 
 const preflightLabels: Record<ProcessMigrationPreflightStatus, string> = {
   NATIVE_STRUCTURE_VALIDATED_ONLY: '仅原生结构校验通过',
