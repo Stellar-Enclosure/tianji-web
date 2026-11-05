@@ -4,12 +4,29 @@ import {useCallback, useEffect, useRef, useState} from 'react'
 import {Link, useParams} from 'react-router-dom'
 import {agentApi, isRunId, isTerminal, type AgentEvent, type AgentResult, type AgentRun, type CancelCommand} from '../api/agent'
 import {AgentStreamError, observeAgentRun} from '../api/agentEvents'
+import {isProcessCorrelationUtc} from '../api/processCorrelations'
 import {useAuth} from '../auth/AuthContext'
 import {StatusTag} from './AgentRunsPage'
 import MemoryPreferenceAction from './MemoryPreferenceAction'
 import MemoryPreferenceIntentStatus from './MemoryPreferenceIntentStatus'
 
-type VisibleEvent = Readonly<{eventId: string; sequence: number; type: string; author: string | null; occurredAt: string; summary: string; completed: boolean}>
+type VisibleToolEvent = Readonly<{toolKey: string; version: number; state: ToolEventState;
+  accounting: 'PENDING' | 'SETTLED' | null}>
+type VisibleEvent = Readonly<{eventId: string; sequence: number; type: string; author: string | null;
+  occurredAt: string; summary: string; completed: boolean; tool?: VisibleToolEvent | null}>
+
+const TOOL_STATES = {
+  REQUESTED: '已记录请求', PREPARED: '已记录准备', DISPATCHING: '已记录派发中',
+  AWAITING_APPROVAL: '等待审批', SUCCEEDED: '已报告成功', REJECTED: '已报告拒绝',
+  FAILED_KNOWN: '已报告失败', UNKNOWN: '结果未知，需核对', UNAVAILABLE: '工具结果暂不可用',
+} as const
+type ToolEventState = keyof typeof TOOL_STATES
+const TOOL_FIELDS = ['toolRef', 'hostInvocationId', 'state', 'dispatchEpoch', 'accountingState', 'errorCode']
+const TOOL_KEY = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}(?![\s\S])/
+const TOOL_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?![\s\S])/
+const TOOL_HASH = /^[0-9a-f]{64}(?![\s\S])/
+const TOOL_ERROR = /^[A-Z][A-Z0-9_]{0,63}(?![\s\S])/
+
 
 export default function AgentRunDetailPage() {
   const {runId = ''} = useParams()
@@ -213,10 +230,24 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
         <Card title={<Space>事件记录 <Tag>{connectionLabel(connection)}</Tag></Space>} variant="borderless" className="surface-card">
           {events.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事件" />
             : <ol className="event-list">{events.map(event => <li key={event.sequence}>
-              <div><Typography.Text strong>#{event.sequence} {event.type}</Typography.Text>
+              <div><Typography.Text strong>#{event.sequence} {event.tool === undefined ? event.type : '工具事件'}</Typography.Text>
                 {event.author && <Typography.Text type="secondary"> · {event.author}</Typography.Text>}</div>
-              <Typography.Text type="secondary">{new Date(event.occurredAt).toLocaleTimeString()}</Typography.Text>
-              {event.summary && <pre className="event-summary">{event.summary}</pre>}
+              {event.tool === undefined ? <>
+                <Typography.Text type="secondary">{new Date(event.occurredAt).toLocaleTimeString()}</Typography.Text>
+                {event.summary && <pre className="event-summary">{event.summary}</pre>}
+              </> : <>
+                {isProcessCorrelationUtc(event.occurredAt)
+                  ? <Typography.Text type="secondary"><time dateTime={event.occurredAt}>{event.occurredAt} UTC</time></Typography.Text>
+                  : <Typography.Text type="secondary">工具事件时间未验证</Typography.Text>}
+                {event.tool === null ? <div>工具事件详情未验证</div> : <div>
+                  <Typography.Text code>{event.tool.toolKey}</Typography.Text>
+                  <Typography.Text> 版本 {event.tool.version} </Typography.Text>
+                  <Tag>{TOOL_STATES[event.tool.state]}</Tag>
+                  {event.tool.accounting !== null && <Typography.Text type="secondary">
+                    {event.tool.accounting === 'SETTLED' ? '记账已结算' : '记账待确认'}
+                  </Typography.Text>}
+                </div>}
+              </>}
             </li>)}</ol>}
           {events.length >= 200 && <Typography.Text type="secondary">仅展示最近 200 条事件。</Typography.Text>}
         </Card>
@@ -225,7 +256,51 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
   </section>
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isToolState = (state: unknown): state is ToolEventState =>
+  typeof state === 'string' && Object.hasOwn(TOOL_STATES, state)
+
+function toolEvidence(event: AgentEvent): VisibleToolEvent | null {
+  if (event.type !== 'TOOL_STARTED' && event.type !== 'TOOL_FINISHED') return null
+  const payload = event.payload
+  if (!Object.keys(payload).every(key => TOOL_FIELDS.includes(key))
+      || !['toolRef', 'hostInvocationId', 'state'].every(key => Object.hasOwn(payload, key))) return null
+  const {toolRef, hostInvocationId, state, dispatchEpoch, accountingState, errorCode} = payload
+  if (!isRecord(toolRef) || Object.keys(toolRef).length !== 3
+      || !['key', 'version', 'contentSha256'].every(key => Object.hasOwn(toolRef, key))
+      || typeof toolRef.key !== 'string' || !TOOL_KEY.test(toolRef.key)
+      || typeof toolRef.version !== 'number' || !Number.isSafeInteger(toolRef.version) || toolRef.version < 1
+      || typeof toolRef.contentSha256 !== 'string' || !TOOL_HASH.test(toolRef.contentSha256)
+      || typeof hostInvocationId !== 'string' || !TOOL_UUID.test(hostInvocationId) || !isToolState(state)) return null
+
+  const hasEpoch = Object.hasOwn(payload, 'dispatchEpoch')
+  const hasAccounting = Object.hasOwn(payload, 'accountingState')
+  const hasError = Object.hasOwn(payload, 'errorCode')
+  const accounting = accountingState === 'PENDING' || accountingState === 'SETTLED' ? accountingState : null
+  if ((hasEpoch && (typeof dispatchEpoch !== 'number' || !Number.isSafeInteger(dispatchEpoch) || dispatchEpoch < 0))
+      || (hasAccounting && accounting === null)
+      || (hasError && (typeof errorCode !== 'string' || !TOOL_ERROR.test(errorCode)))) return null
+
+  if (event.type === 'TOOL_STARTED') {
+    if (state !== 'REQUESTED' || dispatchEpoch !== 0 || hasAccounting || hasError) return null
+  } else if (state === 'UNAVAILABLE') {
+    if (hasEpoch || hasAccounting || !hasError) return null
+  } else if (state === 'AWAITING_APPROVAL') {
+    if (dispatchEpoch !== 0 || accounting !== 'PENDING' || hasError) return null
+  } else {
+    const terminal = state === 'SUCCEEDED' || state === 'REJECTED' || state === 'FAILED_KNOWN'
+    if (state === 'REQUESTED' || accounting === null || (!hasEpoch && !terminal)) return null
+  }
+  return {toolKey: toolRef.key, version: toolRef.version, state, accounting}
+}
+
 const visible = (event: AgentEvent): VisibleEvent => {
+  if (event.type.startsWith('TOOL_')) {
+    return {eventId: event.eventId, sequence: event.sequence, type: event.type, author: null,
+      occurredAt: event.occurredAt, completed: false, summary: '', tool: toolEvidence(event)}
+  }
   const raw = typeof event.payload.text === 'string' ? event.payload.text : JSON.stringify(event.payload)
   return {eventId: event.eventId, sequence: event.sequence, type: event.type, author: event.author, occurredAt: event.occurredAt, completed: event.type === 'RUN_STATUS_CHANGED' && event.payload.status === 'COMPLETED',
     summary: raw.length > 2048 ? `${raw.slice(0, 2048)}…` : raw === '{}' ? '' : raw}

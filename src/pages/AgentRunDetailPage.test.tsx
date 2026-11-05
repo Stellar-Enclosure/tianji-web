@@ -28,6 +28,27 @@ const terminalResult = (usage: AgentResultUsage | null = null, text = 'final ans
   runId: 'run-1', status: 'COMPLETED', output: {text}, errorCode: null, sideEffectOutcome: null, usage,
 })
 
+const toolHash = 'a'.repeat(64)
+const hostInvocationId = 'a702401a-326d-4501-a688-6abb6dac9c8a'
+const toolRef = {key: 'expense.lookup', version: 3, contentSha256: toolHash}
+const reportedTool = {toolRef, hostInvocationId, state: 'UNKNOWN', dispatchEpoch: 2,
+  accountingState: 'PENDING', errorCode: 'TIANJI_PRIVATE_ERROR'}
+const testEvent = (sequence: number, type: string, payload: Readonly<Record<string, unknown>>,
+                   occurredAt = '2026-11-05T10:20:30.123456Z') => ({
+  eventId: 'evt-' + sequence, runId: 'run-1', sequence, type, author: 'private-tool-author', occurredAt, payload,
+})
+const streamEvents = () => {
+  let receive: Parameters<typeof observeAgentRun>[0]['onEvent'] | undefined
+  vi.mocked(observeAgentRun).mockImplementation(options => {
+    receive = options.onEvent
+    return new Promise(resolve => options.signal.addEventListener('abort', () => resolve(), {once: true}))
+  })
+  return async (...events: Parameters<Parameters<typeof observeAgentRun>[0]['onEvent']>[0][]) => {
+    await waitFor(() => expect(receive).toBeDefined())
+    await act(async () => { events.forEach(event => receive?.(event)) })
+  }
+}
+
 describe('Agent run detail', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -159,6 +180,71 @@ describe('Agent run detail', () => {
     expect(screen.queryByText('prior tenant answer')).not.toBeInTheDocument()
     expect(screen.queryByText('12345')).not.toBeInTheDocument()
     expect(screen.queryByText('暂无可核验金额')).not.toBeInTheDocument()
+  })
+
+  it('shows persisted Tool event state without raw governance identifiers', async () => {
+    const send = streamEvents()
+    render(view())
+    await send(
+      testEvent(1, 'TOOL_STARTED', {toolRef, hostInvocationId, state: 'REQUESTED', dispatchEpoch: 0}),
+      testEvent(2, 'TOOL_FINISHED', reportedTool),
+      testEvent(3, 'TOOL_FINISHED', {toolRef, hostInvocationId, state: 'AWAITING_APPROVAL', dispatchEpoch: 0, accountingState: 'PENDING'}),
+      testEvent(4, 'TOOL_FINISHED', {toolRef, hostInvocationId, state: 'SUCCEEDED', accountingState: 'SETTLED'}),
+      testEvent(5, 'TOOL_FINISHED', {toolRef, hostInvocationId, state: 'UNAVAILABLE', errorCode: 'TIANJI_PRIVATE_ERROR'}),
+    )
+    expect(screen.getByText('已记录请求')).toBeInTheDocument()
+    expect(screen.getByText('结果未知，需核对')).toBeInTheDocument()
+    expect(screen.getByText('等待审批')).toBeInTheDocument()
+    expect(screen.getByText('已报告成功')).toBeInTheDocument()
+    expect(screen.getByText('工具结果暂不可用')).toBeInTheDocument()
+    expect(screen.getAllByText('记账待确认')).toHaveLength(2)
+    expect(screen.getByText('记账已结算')).toBeInTheDocument()
+    expect(screen.getAllByText('expense.lookup')).toHaveLength(5)
+    expect(screen.getAllByText('版本 3')).toHaveLength(5)
+    expect(screen.getByText('#2 工具事件')).toBeInTheDocument()
+    expect(document.querySelectorAll('time[datetime="2026-11-05T10:20:30.123456Z"]')).toHaveLength(5)
+    for (const raw of [hostInvocationId, toolHash, 'dispatchEpoch', 'TIANJI_PRIVATE_ERROR', 'private-tool-author']) {
+      expect(screen.queryByText(raw, {exact: false})).not.toBeInTheDocument()
+    }
+    expect(agentApi.result).not.toHaveBeenCalled()
+  })
+
+  it('hides malformed and unrecognized Tool payloads without a raw fallback', async () => {
+    const send = streamEvents()
+    render(view())
+    await send(
+      testEvent(1, 'TOOL_FINISHED', {...reportedTool, credential: 'never-display-secret'}),
+      testEvent(2, 'TOOL_STARTED', {...reportedTool, state: 'REQUESTED'}),
+      testEvent(3, 'TOOL_FINISHED', {...reportedTool, toolRef: {...toolRef, internal: 'hidden-in-ref'}}),
+      testEvent(4, 'TOOL_FINISHED', {...reportedTool, state: 'AWAITING_APPROVAL'}),
+      testEvent(5, 'TOOL_FINISHED', {...reportedTool, dispatchEpoch: 2.5}),
+      testEvent(6, 'TOOL_PRIVATE_UNKNOWN', {secret: 'unknown-type-secret'}),
+      testEvent(7, 'TOOL_FINISHED', reportedTool, '2026-11-05T10:20:30+00:00'),
+    )
+    expect(screen.getAllByText('工具事件详情未验证')).toHaveLength(6)
+    expect(screen.getByText('工具事件时间未验证')).toBeInTheDocument()
+    expect(screen.getByText('结果未知，需核对')).toBeInTheDocument()
+    for (const raw of ['never-display-secret', 'hidden-in-ref', 'unknown-type-secret', 'TOOL_PRIVATE_UNKNOWN',
+      hostInvocationId, toolHash, '2026-11-05T10:20:30+00:00']) {
+      expect(screen.queryByText(raw, {exact: false})).not.toBeInTheDocument()
+    }
+  })
+
+  it('keeps generic timeline facts and current run result independent of a malformed Tool event', async () => {
+    const send = streamEvents()
+    vi.mocked(agentApi.get).mockResolvedValueOnce(run()).mockResolvedValue(run('run-1', 'COMPLETED'))
+    vi.mocked(agentApi.result).mockResolvedValue({...terminalResult(null, '现有执行结果'), sideEffectOutcome: 'UNKNOWN'})
+    render(view())
+    await send(
+      testEvent(1, 'TOOL_FINISHED', {...reportedTool, rawResult: 'private raw result'}),
+      {...testEvent(2, 'RUN_STATUS_CHANGED', {from: 'RUNNING', status: 'COMPLETED'}), author: null},
+    )
+    expect(await screen.findByText('现有执行结果')).toBeInTheDocument()
+    expect(screen.getByText('#2 RUN_STATUS_CHANGED')).toBeInTheDocument()
+    expect(screen.getByText(/外部操作结果待核对/)).toBeInTheDocument()
+    expect(screen.getByText('工具事件详情未验证')).toBeInTheDocument()
+    expect(screen.queryByText('private raw result', {exact: false})).not.toBeInTheDocument()
+    expect(agentApi.result).toHaveBeenCalledTimes(1)
   })
 
   it('enables preference extraction only after the matching actual completed status event arrives', async () => {
