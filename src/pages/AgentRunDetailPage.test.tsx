@@ -1,7 +1,7 @@
 import {act, fireEvent, render, screen, waitFor} from '@testing-library/react'
 import {MemoryRouter, Route, Routes} from 'react-router-dom'
 import {beforeEach, describe, expect, it, vi} from 'vitest'
-import {agentApi} from '../api/agent'
+import {agentApi, type AgentResult, type AgentResultUsage} from '../api/agent'
 import {AgentStreamError, observeAgentRun} from '../api/agentEvents'
 import {useAuth} from '../auth/AuthContext'
 import {authorization, run} from '../test/fixtures'
@@ -23,6 +23,10 @@ const auth = (canCancel = true) => ({status: 'ready' as const, authorization: au
 const view = () => <MemoryRouter initialEntries={['/runs/run-1']}><Routes>
   <Route path="/runs/:runId" element={<AgentRunDetailPage />} /><Route path="/runs" element={<div>列表</div>} />
 </Routes></MemoryRouter>
+
+const terminalResult = (usage: AgentResultUsage | null = null, text = 'final answer'): AgentResult => ({
+  runId: 'run-1', status: 'COMPLETED', output: {text}, errorCode: null, sideEffectOutcome: null, usage,
+})
 
 describe('Agent run detail', () => {
   beforeEach(() => {
@@ -98,9 +102,68 @@ describe('Agent run detail', () => {
     await waitFor(() => expect(agentApi.get).toHaveBeenCalledTimes(2))
   })
 
+  it('shows unknown usage and fees for an existing terminal result without usage', async () => {
+    vi.mocked(agentApi.get).mockResolvedValue(run('run-1', 'COMPLETED'))
+    vi.mocked(agentApi.result).mockResolvedValue(terminalResult())
+    render(view())
+    expect(await screen.findByText('final answer')).toBeInTheDocument()
+    expect(screen.getByText('用量未知')).toBeInTheDocument()
+    expect(screen.getByText('费用未知')).toBeInTheDocument()
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
+    expect(agentApi.result).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([['ACTUAL', '已报告实测'], ['ESTIMATED', '已报告估算']] as const)(
+    'shows exact safe counters and a nonnumeric fee state for %s usage', async (kind, label) => {
+      vi.mocked(agentApi.get).mockResolvedValue(run('run-1', 'COMPLETED'))
+      vi.mocked(agentApi.result).mockResolvedValue(terminalResult({
+        kind, inputTokens: 0, outputTokens: null, totalTokens: 7, costReported: true,
+      }))
+      render(view())
+      expect(await screen.findByText(label)).toBeInTheDocument()
+      expect(screen.getByText('0')).toBeInTheDocument()
+      expect(screen.getByText('未知')).toBeInTheDocument()
+      expect(screen.getByText('7')).toBeInTheDocument()
+      expect(screen.getByText('暂无可核验金额')).toBeInTheDocument()
+      expect(screen.queryByText('费用未知')).not.toBeInTheDocument()
+      expect(agentApi.result).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('does not request or show terminal usage while the current run is active', async () => {
+    render(view())
+    expect(await screen.findByText('research')).toBeInTheDocument()
+    expect(screen.queryByText('用量与费用')).not.toBeInTheDocument()
+    expect(agentApi.result).not.toHaveBeenCalled()
+  })
+
+  it('does not render usage or output returned by the prior tenant after a tenant change', async () => {
+    let finishOld: ((result: AgentResult) => void) | undefined
+    let oldSignal: AbortSignal | undefined
+    vi.mocked(agentApi.get).mockResolvedValue(run('run-1', 'COMPLETED'))
+    vi.mocked(agentApi.result).mockImplementationOnce((_tenant, _runId, signal) => {
+      oldSignal = signal
+      return new Promise(resolve => { finishOld = resolve })
+    }).mockResolvedValueOnce(terminalResult(null, 'current tenant answer'))
+    const rendered = render(view())
+    await waitFor(() => expect(finishOld).toBeDefined())
+
+    vi.mocked(useAuth).mockReturnValue({...auth(), authorization: authorization('21')})
+    rendered.rerender(view())
+    expect(await screen.findByText('current tenant answer')).toBeInTheDocument()
+    expect(oldSignal?.aborted).toBe(true)
+    await act(async () => { finishOld?.(terminalResult({
+      kind: 'ACTUAL', inputTokens: 12345, outputTokens: 0, totalTokens: 12345, costReported: true,
+    }, 'prior tenant answer')) })
+    expect(screen.getByText('费用未知')).toBeInTheDocument()
+    expect(screen.queryByText('prior tenant answer')).not.toBeInTheDocument()
+    expect(screen.queryByText('12345')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无可核验金额')).not.toBeInTheDocument()
+  })
+
   it('enables preference extraction only after the matching actual completed status event arrives', async () => {
     vi.mocked(agentApi.get).mockResolvedValue({...run('run-1', 'COMPLETED'), finishedAt: '2026-10-31T00:00:00Z'})
-    vi.mocked(agentApi.result).mockResolvedValue({runId: 'run-1', status: 'COMPLETED', output: {}, errorCode: null, sideEffectOutcome: null})
+    vi.mocked(agentApi.result).mockResolvedValue(terminalResult())
     let receive: Parameters<typeof observeAgentRun>[0]['onEvent'] | undefined
     vi.mocked(observeAgentRun).mockImplementation(options => { receive = options.onEvent; return new Promise(resolve => options.signal.addEventListener('abort', () => resolve(), {once: true})) })
     render(view()); await waitFor(() => expect(receive).toBeDefined())

@@ -195,8 +195,18 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
         <Card title="执行输出" variant="borderless" className="surface-card">
           {result?.sideEffectOutcome === 'UNKNOWN' && <Alert type="warning" showIcon message="外部操作结果待核对，请勿直接重复执行。" className="form-alert" />}
           {result?.errorCode && <Alert type="error" showIcon message={`运行错误：${result.errorCode}`} className="form-alert" />}
-          {result ? <pre className="output-text">{formatOutput(result.output)}</pre>
-            : partials.size ? [...partials].map(([author, text]) => <div key={author} className="partial-output">
+          {result ? <>
+            <pre className="output-text">{formatOutput(result.output)}</pre>
+            {isTerminal(run.status) && isTerminal(result.status) && result.runId === run.runId &&
+              <Descriptions title="用量与费用" column={{xs: 1, sm: 2}} items={[
+                {key: 'usage-kind', label: '用量口径', children: result.usage?.kind === 'ACTUAL' ? '已报告实测'
+                  : result.usage?.kind === 'ESTIMATED' ? '已报告估算' : '用量未知'},
+                {key: 'input-tokens', label: '输入 Token', children: result.usage?.inputTokens ?? '未知'},
+                {key: 'output-tokens', label: '输出 Token', children: result.usage?.outputTokens ?? '未知'},
+                {key: 'total-tokens', label: '总 Token', children: result.usage?.totalTokens ?? '未知'},
+                {key: 'cost', label: '费用', children: result.usage?.costReported ? '暂无可核验金额' : '费用未知'},
+              ]} />}
+          </> : partials.size ? [...partials].map(([author, text]) => <div key={author} className="partial-output">
               <Typography.Text strong>{author}</Typography.Text><pre className="output-text">{text}</pre></div>)
               : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无输出" />}
         </Card>
