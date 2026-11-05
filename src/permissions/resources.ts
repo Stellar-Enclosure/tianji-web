@@ -61,4 +61,8 @@ export const resources = defineResources([
     requirement: {mode: 'ALL', codes: [PROCESS_RELEASE_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.processReleases'}},
   {key: 'tianji.menu.processReleases', type: 'MENU', target: {route: '/operations/process-releases', parentKey: 'tianji.app.console'},
     requirement: {mode: 'ALL', codes: [PROCESS_RELEASE_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.processReleases'}},
+  {key: 'tianji.page.processCorrelations', type: 'PAGE', target: {route: '/operations/process-correlations'},
+    requirement: {mode: 'ALL', codes: [PROCESS_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.processCorrelations'}},
+  {key: 'tianji.menu.processCorrelations', type: 'MENU', target: {route: '/operations/process-correlations', parentKey: 'tianji.app.console'},
+    requirement: {mode: 'ALL', codes: [PROCESS_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.processCorrelations'}},
 ] as const)

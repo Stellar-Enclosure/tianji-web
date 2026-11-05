@@ -34,4 +34,8 @@ export const messages = defineMessages([
     defaults: {'zh-CN': '流程发布元数据', 'en-US': 'Process release metadata'}},
   {pageCode: 'tianji.web.permissions', key: 'menu.processReleases', defaultLocale: 'zh-CN',
     defaults: {'zh-CN': '流程发布元数据', 'en-US': 'Process release metadata'}},
+  {pageCode: 'tianji.web.permissions', key: 'page.processCorrelations', defaultLocale: 'zh-CN',
+    defaults: {'zh-CN': '流程关联查询', 'en-US': 'Process correlation lookup'}},
+  {pageCode: 'tianji.web.permissions', key: 'menu.processCorrelations', defaultLocale: 'zh-CN',
+    defaults: {'zh-CN': '流程关联查询', 'en-US': 'Process correlation lookup'}},
 ] as const)

@@ -12,6 +12,7 @@ import TaskDetailPage from './pages/TaskDetailPage'
 import TaskInboxPage from './pages/TaskInboxPage'
 import WorkerFailuresPage from './pages/WorkerFailuresPage'
 import DefinitionReleasePage from './pages/DefinitionReleasePage'
+import ExecutionTimelinePage from './pages/ExecutionTimelinePage'
 
 const configuredBase: string = import.meta.env.VITE_BASE_PATH ?? '/'
 if (!configuredBase.startsWith('/') || configuredBase.startsWith('//') || /[\\?#%]/.test(configuredBase)
@@ -50,6 +51,7 @@ function SessionRoutes() {
       <Route path="/cases/:caseInstanceId" element={<RequireResource resource="tianji.page.caseDetail"><CaseDetailPage /></RequireResource>} />
       <Route path="/operations/worker-failures" element={<RequireResource resource="tianji.page.workerFailures"><WorkerFailuresPage /></RequireResource>} />
       <Route path="/operations/process-releases" element={<RequireResource resource="tianji.page.processReleases"><DefinitionReleasePage /></RequireResource>} />
+      <Route path="/operations/process-correlations" element={<RequireResource resource="tianji.page.processCorrelations"><ExecutionTimelinePage /></RequireResource>} />
       <Route path="*" element={<Result status="404" title="页面不存在" />} />
     </Route>
   </Routes>
@@ -75,6 +77,8 @@ function Shell() {
         activePathPrefixes: ['/operations/worker-failures'], icon: <WarningOutlined />}] : []),
       ...(allows('tianji.menu.processReleases') ? [{key: 'processReleases', label: '流程发布元数据', path: '/operations/process-releases',
         activePathPrefixes: ['/operations/process-releases'], icon: <FileTextOutlined />}] : []),
+      ...(allows('tianji.menu.processCorrelations') ? [{key: 'processCorrelations', label: '流程关联查询', path: '/operations/process-correlations',
+        activePathPrefixes: ['/operations/process-correlations'], icon: <AuditOutlined />}] : []),
     ],
     actions: <Tag color="success">会话已验证</Tag>,
     user: {name: authorization.identity.subject, description: `租户 ${authorization.identity.tenantId}`,

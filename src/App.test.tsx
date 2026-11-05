@@ -25,6 +25,7 @@ vi.mock('./pages/TaskDetailPage', () => ({default: () => <h1>任务详情</h1>})
 vi.mock('./pages/CaseDetailPage', () => ({default: () => <h1>案件查询</h1>}))
 vi.mock('./pages/WorkerFailuresPage', () => ({default: () => <h1>Worker 失败观察</h1>}))
 vi.mock('./pages/DefinitionReleasePage', () => ({default: () => <h1>流程发布元数据</h1>}))
+vi.mock('./pages/ExecutionTimelinePage', () => ({default: () => <h1>流程关联查询</h1>}))
 
 const auth = (codes: string[]) => {
   const current = authorization('20', codes)
@@ -274,5 +275,57 @@ describe('Process release metadata routes', () => {
       expect(label.defaults).toEqual({'zh-CN': '流程发布元数据', 'en-US': 'Process release metadata'})
     }
     expect(messages.filter(item => item.key.endsWith('processReleases'))).toHaveLength(2)
+  })
+})
+
+describe('Owned Process correlation routes', () => {
+  const route = '/operations/process-correlations'
+  const read = 'TIANJI_PROCESS_READ'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    gatewayAuth.context.invalidate()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('opens Process correlation lookup with the existing Process read permission', async () => {
+    open(route, ['TIANJI_TASK_READ', read])
+    expect(await screen.findByRole('heading', {name: '流程关联查询'})).toBeInTheDocument()
+    expect(screen.getByRole('link', {name: '流程关联查询'})).toHaveAttribute('href', route)
+    expect(screen.queryByRole('link', {name: 'Worker 失败观察'})).not.toBeInTheDocument()
+  })
+
+  it('keeps Process correlation route and menu hidden without Process read', async () => {
+    open(route, ['TIANJI_TASK_READ', 'TIANJI_PROCESS_RELEASE_READ', 'TIANJI_PROCESS_WORKER_RECOVER'])
+    expect(await screen.findByText('当前身份不能访问此页面。')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', {name: '流程关联查询'})).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', {name: '流程关联查询'})).not.toBeInTheDocument()
+  })
+
+  it('preserves APP admission and the task landing for existing callers', async () => {
+    expect(auth([read]).allows('tianji.app.console')).toBe(false)
+    open('/', ['TIANJI_TASK_READ', read])
+    expect(await screen.findByRole('heading', {name: '任务箱'})).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/tasks')
+  })
+
+  it('declares the exact correlation resources, labels and read references', () => {
+    const requirement = {mode: 'ALL', codes: [read]}
+    expect(resources.filter(item => item.key.endsWith('processCorrelations'))).toEqual([
+      {key: 'tianji.page.processCorrelations', type: 'PAGE', target: {route}, requirement,
+        i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.processCorrelations'}},
+      {key: 'tianji.menu.processCorrelations', type: 'MENU', target: {route, parentKey: 'tianji.app.console'}, requirement,
+        i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.processCorrelations'}},
+    ])
+    expect(references.filter(item => ['tianji.api.process.instance.correlations', 'tianji.api.process.instance.get'].includes(item.key)))
+      .toEqual([
+        {key: 'tianji.api.process.instance.correlations', usage: 'CALLS'},
+        {key: 'tianji.api.process.instance.get', usage: 'CALLS'},
+      ])
+    const labels = messages.filter(item => item.key.endsWith('processCorrelations'))
+    expect(labels).toHaveLength(2)
+    for (const label of labels) {
+      expect(label.defaults).toEqual({'zh-CN': '流程关联查询', 'en-US': 'Process correlation lookup'})
+    }
   })
 })
