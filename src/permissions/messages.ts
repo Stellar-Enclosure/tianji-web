@@ -30,4 +30,8 @@ export const messages = defineMessages([
     defaults: {'zh-CN': 'Worker 失败观察', 'en-US': 'Worker failure observations'}},
   {pageCode: 'tianji.web.permissions', key: 'menu.workerFailures', defaultLocale: 'zh-CN',
     defaults: {'zh-CN': 'Worker 失败观察', 'en-US': 'Worker failure observations'}},
+  {pageCode: 'tianji.web.permissions', key: 'page.processReleases', defaultLocale: 'zh-CN',
+    defaults: {'zh-CN': '流程发布元数据', 'en-US': 'Process release metadata'}},
+  {pageCode: 'tianji.web.permissions', key: 'menu.processReleases', defaultLocale: 'zh-CN',
+    defaults: {'zh-CN': '流程发布元数据', 'en-US': 'Process release metadata'}},
 ] as const)

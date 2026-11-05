@@ -25,4 +25,5 @@ export const references = defineResourceReferences([
   {key: 'tianji.api.process.case.get', usage: 'CALLS'},
   {key: 'tianji.api.process.case.actPlanItem', usage: 'CALLS'},
   {key: 'tianji.api.process.instance.worker-failures', usage: 'CALLS'},
+  {key: 'tianji.api.process.release.get', usage: 'CALLS'},
 ] as const)

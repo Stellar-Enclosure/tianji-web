@@ -24,6 +24,7 @@ vi.mock('./pages/TaskInboxPage', () => ({default: () => <h1>任务箱</h1>}))
 vi.mock('./pages/TaskDetailPage', () => ({default: () => <h1>任务详情</h1>}))
 vi.mock('./pages/CaseDetailPage', () => ({default: () => <h1>案件查询</h1>}))
 vi.mock('./pages/WorkerFailuresPage', () => ({default: () => <h1>Worker 失败观察</h1>}))
+vi.mock('./pages/DefinitionReleasePage', () => ({default: () => <h1>流程发布元数据</h1>}))
 
 const auth = (codes: string[]) => {
   const current = authorization('20', codes)
@@ -224,5 +225,54 @@ describe('Worker failure observations route', () => {
     expect(references.filter(reference => reference.key.startsWith('tianji.api.process.instance.worker-'))).toEqual([
       {key: 'tianji.api.process.instance.worker-failures', usage: 'CALLS'},
     ])
+  })
+})
+
+describe('Process release metadata routes', () => {
+  const route = '/operations/process-releases'
+  const releaseRead = 'TIANJI_PROCESS_RELEASE_READ'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    gatewayAuth.context.invalidate()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('opens release metadata with the existing release read permission', async () => {
+    open(route, ['TIANJI_TASK_READ', releaseRead])
+    expect(await screen.findByRole('heading', {name: '流程发布元数据'})).toBeInTheDocument()
+    expect(screen.getByRole('link', {name: '流程发布元数据'})).toHaveAttribute('href', route)
+  })
+
+  it('denies the new route and menu without release read even with Worker permissions', async () => {
+    open(route, ['TIANJI_TASK_READ', 'TIANJI_PROCESS_READ', 'TIANJI_PROCESS_WORKER_RECOVER'])
+    expect(await screen.findByText('当前身份不能访问此页面。')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', {name: '流程发布元数据'})).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', {name: '流程发布元数据'})).not.toBeInTheDocument()
+    expect(screen.getByRole('link', {name: 'Worker 失败观察'})).toBeInTheDocument()
+  })
+
+  it('preserves existing APP and landing with release read', async () => {
+    expect(auth([releaseRead]).allows('tianji.app.console')).toBe(false)
+    open('/', ['TIANJI_TASK_READ', releaseRead])
+    expect(await screen.findByRole('heading', {name: '任务箱'})).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/tasks')
+  })
+
+  it('declares exact release page, menu, labels and existing GET reference only', () => {
+    const requirement = {mode: 'ALL', codes: [releaseRead]}
+    expect(resources.filter(item => item.key.endsWith('processReleases'))).toEqual([
+      {key: 'tianji.page.processReleases', type: 'PAGE', target: {route}, requirement,
+        i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.processReleases'}},
+      {key: 'tianji.menu.processReleases', type: 'MENU', target: {route, parentKey: 'tianji.app.console'}, requirement,
+        i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.processReleases'}},
+    ])
+    expect(references.filter(item => item.key.startsWith('tianji.api.process.release.'))).toEqual([
+      {key: 'tianji.api.process.release.get', usage: 'CALLS'},
+    ])
+    for (const label of messages.filter(item => item.key.endsWith('processReleases'))) {
+      expect(label.defaults).toEqual({'zh-CN': '流程发布元数据', 'en-US': 'Process release metadata'})
+    }
+    expect(messages.filter(item => item.key.endsWith('processReleases'))).toHaveLength(2)
   })
 })

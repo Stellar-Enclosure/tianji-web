@@ -1,4 +1,4 @@
-import {AppstoreOutlined, AuditOutlined, FolderOpenOutlined, InboxOutlined, LogoutOutlined, WarningOutlined} from '@ant-design/icons'
+import {AppstoreOutlined, AuditOutlined, FileTextOutlined, FolderOpenOutlined, InboxOutlined, LogoutOutlined, WarningOutlined} from '@ant-design/icons'
 import {EnterpriseLayout, type EnterpriseLayoutConfig} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Result, Spin, Tag} from 'antd'
 import type {ReactNode} from 'react'
@@ -11,6 +11,7 @@ import CaseDetailPage from './pages/CaseDetailPage'
 import TaskDetailPage from './pages/TaskDetailPage'
 import TaskInboxPage from './pages/TaskInboxPage'
 import WorkerFailuresPage from './pages/WorkerFailuresPage'
+import DefinitionReleasePage from './pages/DefinitionReleasePage'
 
 const configuredBase: string = import.meta.env.VITE_BASE_PATH ?? '/'
 if (!configuredBase.startsWith('/') || configuredBase.startsWith('//') || /[\\?#%]/.test(configuredBase)
@@ -48,6 +49,7 @@ function SessionRoutes() {
       <Route path="/cases" element={<RequireResource resource="tianji.page.cases"><CaseDetailPage /></RequireResource>} />
       <Route path="/cases/:caseInstanceId" element={<RequireResource resource="tianji.page.caseDetail"><CaseDetailPage /></RequireResource>} />
       <Route path="/operations/worker-failures" element={<RequireResource resource="tianji.page.workerFailures"><WorkerFailuresPage /></RequireResource>} />
+      <Route path="/operations/process-releases" element={<RequireResource resource="tianji.page.processReleases"><DefinitionReleasePage /></RequireResource>} />
       <Route path="*" element={<Result status="404" title="页面不存在" />} />
     </Route>
   </Routes>
@@ -71,6 +73,8 @@ function Shell() {
       ...(allows('tianji.menu.cases') ? [{key: 'cases', label: '案件查询', path: '/cases', activePathPrefixes: ['/cases'], icon: <FolderOpenOutlined />}] : []),
       ...(allows('tianji.menu.workerFailures') ? [{key: 'workerFailures', label: 'Worker 失败观察', path: '/operations/worker-failures',
         activePathPrefixes: ['/operations/worker-failures'], icon: <WarningOutlined />}] : []),
+      ...(allows('tianji.menu.processReleases') ? [{key: 'processReleases', label: '流程发布元数据', path: '/operations/process-releases',
+        activePathPrefixes: ['/operations/process-releases'], icon: <FileTextOutlined />}] : []),
     ],
     actions: <Tag color="success">会话已验证</Tag>,
     user: {name: authorization.identity.subject, description: `租户 ${authorization.identity.tenantId}`,
