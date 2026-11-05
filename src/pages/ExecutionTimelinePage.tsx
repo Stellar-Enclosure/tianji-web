@@ -4,6 +4,8 @@ import {useLayoutEffect, useRef, useState} from 'react'
 import {Link} from 'react-router-dom'
 import {agentApi, type AgentRun, type AgentRunPage} from '../api/agent'
 import {processAgentOutcomesApi, type ProcessAgentOutcome, type ProcessAgentOutcomePage} from '../api/processAgentOutcomes'
+import {processMigrationPreflightApi, type ProcessMigrationPreflight, type ProcessMigrationPreflightStatus, type ProcessMigrationTarget} from '../api/processMigrationPreflight'
+import {isProcessReleaseVersion, processReleasesApi} from '../api/processReleases'
 import {isProcessCorrelationId, isProcessCorrelationQuery, isProcessCorrelationUtc, processCorrelationsApi,
   type ProcessCorrelationPage, type ProcessCorrelationQuery, type ProcessCorrelationReceipt,
   type ProcessInstanceSnapshot} from '../api/processCorrelations'
@@ -13,6 +15,7 @@ import {StatusTag} from './AgentRunsPage'
 const PAGE = 'tianji.page.processCorrelations'
 const AGENT_PAGE = 'tianji.page.runs'
 const AGENT_DETAIL = 'tianji.page.runDetail'
+const RELEASE_PAGE = 'tianji.page.processReleases'
 const TIME_EXAMPLE = '2026-11-05T00:00:00Z'
 const INVALID_UTC = '请输入有效的 UTC 时间。'
 const INVALID_WINDOW = '请输入有效且不超过 31 天的 UTC 查询时间窗。'
@@ -234,10 +237,122 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
     {detail.phase === 'snapshot' && <ProcessAgentOutcomeLookup key={detail.selection}
       tenant={tenant} instanceId={detail.snapshot.instanceId}
       isSelectionCurrent={() => sequence.current === detail.selection && currentAllows.current(PAGE)} />}
+    {detail.phase === 'snapshot' && allows(RELEASE_PAGE) && <ProcessMigrationPreflightLookup key={detail.selection}
+      tenant={tenant} instance={detail.snapshot}
+      isSelectionCurrent={() => sequence.current === detail.selection && currentAllows.current(PAGE)
+        && currentAllows.current(RELEASE_PAGE)} />}
     {agentWindow && allows(AGENT_PAGE) && <OwnerAgentCorrelationLookup tenant={tenant} query={agentWindow} />}
   </section>
 }
 
+
+const preflightLabels: Record<ProcessMigrationPreflightStatus, string> = {
+  NATIVE_STRUCTURE_VALIDATED_ONLY: '仅原生结构校验通过',
+  INSTANCE_NOT_LIVE: '实例当前不可预检',
+  TARGET_UNAVAILABLE: '目标发布不可用',
+  TARGET_PIN_MISMATCH: '目标发布摘要不匹配',
+  RELEASE_PAIR_UNSUPPORTED: '该版本组合不受支持',
+  SHAPE_UNSUPPORTED: '流程结构不受支持',
+  ACTIVE_EVIDENCE_UNSAFE: '当前实例证据不足',
+  NATIVE_REJECTED: '原生结构校验未通过',
+}
+
+function ProcessMigrationPreflightLookup({tenant, instance, isSelectionCurrent}: {
+  tenant: string
+  instance: ProcessInstanceSnapshot
+  isSelectionCurrent: () => boolean
+}) {
+  const [version, setVersion] = useState('')
+  const [pin, setPin] = useState<ProcessMigrationTarget>()
+  const [report, setReport] = useState<ProcessMigrationPreflight>()
+  const [loading, setLoading] = useState<'release' | 'preflight'>()
+  const [error, setError] = useState<string>()
+  const pending = useRef<AbortController | null>(null)
+
+  useLayoutEffect(() => () => {
+    pending.current?.abort()
+    pending.current = null
+  }, [])
+
+  const reset = (value: string) => {
+    pending.current?.abort()
+    pending.current = null
+    setVersion(value)
+    setPin(undefined)
+    setReport(undefined)
+    setLoading(undefined)
+    setError(undefined)
+  }
+  const current = (request: AbortController) =>
+    pending.current === request && !request.signal.aborted && isSelectionCurrent()
+  const finish = (request: AbortController) => {
+    if (pending.current !== request) return
+    pending.current = null
+    if (!request.signal.aborted && isSelectionCurrent()) setLoading(undefined)
+  }
+
+  const readRelease = async () => {
+    if (pending.current || !isSelectionCurrent()) return
+    if (!isProcessReleaseVersion(version)) {
+      setError('目标发布版本无效。')
+      return
+    }
+    const request = new AbortController()
+    pending.current = request
+    setLoading('release')
+    setPin(undefined)
+    setReport(undefined)
+    setError(undefined)
+    try {
+      const release = await processReleasesApi.get(tenant, version, request.signal)
+      if (current(request)) setPin({instanceId: instance.instanceId, sourceReleaseVersion: instance.releaseVersion,
+        targetReleaseVersion: release.releaseVersion, expectedTargetManifestSha256: release.manifestSha256})
+    } catch (failure) {
+      if (current(request) && !authFailed(failure)) setError('当前无法读取目标发布。')
+    } finally {
+      finish(request)
+    }
+  }
+
+  const runPreflight = async () => {
+    if (pending.current || !pin || pin.targetReleaseVersion !== version || !isSelectionCurrent()) return
+    const request = new AbortController()
+    pending.current = request
+    setLoading('preflight')
+    setReport(undefined)
+    setError(undefined)
+    try {
+      const result = await processMigrationPreflightApi.get(tenant, pin, request.signal)
+      if (current(request)) setReport(result)
+    } catch (failure) {
+      if (current(request) && !authFailed(failure)) setError('当前无法读取迁移预检结果。')
+    } finally {
+      finish(request)
+    }
+  }
+
+  return <Card title="单实例迁移预检" variant="borderless" className="surface-card">
+    <Space orientation="vertical" className="full-width">
+      <Typography.Text type="secondary">结构预检只检查当前实例与目标发布。</Typography.Text>
+      <label htmlFor="migration-target-release">预检目标发布版本</label>
+      <Input id="migration-target-release" value={version} onChange={event => reset(event.target.value)} />
+      <Space>
+        <Button onClick={() => void readRelease()} loading={loading === 'release'}
+          disabled={loading !== undefined}>读取目标发布摘要</Button>
+        {pin && <Button onClick={() => void runPreflight()} loading={loading === 'preflight'}
+          disabled={loading !== undefined}>运行迁移预检</Button>}
+      </Space>
+      {pin && <Typography.Text>目标清单 SHA-256：{pin.expectedTargetManifestSha256}</Typography.Text>}
+      {error && <Alert type="warning" showIcon title={error} />}
+      {report && <>
+        <Typography.Text strong>{preflightLabels[report.status]}</Typography.Text>
+        <Typography.Text>来源发布：{report.sourceReleaseVersion} → 目标发布：{report.targetReleaseVersion}</Typography.Text>
+        {report.activityId && <Typography.Text>校验活动：{report.activityId}</Typography.Text>}
+        <Typography.Text>观察时间：<UtcTime value={report.observedAt} /></Typography.Text>
+      </>}
+    </Space>
+  </Card>
+}
 
 function OwnerAgentCorrelationLookup({tenant, query}: {tenant: string; query: LookupForm}) {
   const {allows} = useAuth()

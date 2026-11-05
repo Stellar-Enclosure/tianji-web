@@ -5,6 +5,8 @@ import {beforeEach, describe, expect, it, vi} from 'vitest'
 import {agentApi, type AgentRunPage} from '../api/agent'
 import {processAgentOutcomesApi, type ProcessAgentOutcome, type ProcessAgentOutcomePage} from '../api/processAgentOutcomes'
 import {processCorrelationsApi, type ProcessCorrelationPage, type ProcessInstanceSnapshot} from '../api/processCorrelations'
+import {processMigrationPreflightApi, type ProcessMigrationPreflight} from '../api/processMigrationPreflight'
+import {processReleasesApi} from '../api/processReleases'
 import {useAuth} from '../auth/AuthContext'
 import {authorization, run} from '../test/fixtures'
 import ExecutionTimelinePage from './ExecutionTimelinePage'
@@ -12,6 +14,11 @@ import ExecutionTimelinePage from './ExecutionTimelinePage'
 vi.mock('../auth/AuthContext', () => ({useAuth: vi.fn()}))
 vi.mock('../api/agent', () => ({agentApi: {listByCorrelation: vi.fn()}}))
 vi.mock('../api/processAgentOutcomes', () => ({processAgentOutcomesApi: {list: vi.fn()}}))
+vi.mock('../api/processMigrationPreflight', () => ({processMigrationPreflightApi: {get: vi.fn()}}))
+vi.mock('../api/processReleases', async original => {
+  const actual = await original<typeof import('../api/processReleases')>()
+  return {...actual, processReleasesApi: {get: vi.fn()}}
+})
 vi.mock('../api/processCorrelations', async () => {
   const actual = await vi.importActual<typeof import('../api/processCorrelations')>('../api/processCorrelations')
   return {...actual, processCorrelationsApi: {list: vi.fn(), detail: vi.fn()}}
@@ -78,6 +85,89 @@ describe('Process correlation page', () => {
     vi.mocked(processCorrelationsApi.list).mockImplementation(async (_, query) => page(query.correlationId))
     vi.mocked(agentApi.listByCorrelation).mockResolvedValue(agentPage())
     vi.mocked(processAgentOutcomesApi.list).mockImplementation(async (_, instanceId) => outcomePage(instanceId))
+  })
+
+  it('offers an explicit migration preflight only after current Process detail and release permission', async () => {
+    const currentAccess = auth()
+    current = {...currentAccess, allows: resource => resource === 'tianji.page.processReleases' || currentAccess.allows(resource)}
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValue(snapshot())
+    render(screenWithRouter())
+    expect(screen.queryByRole('button', {name: '读取目标发布摘要'})).toBeNull()
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+    expect(await screen.findByText('来源：Process 实例快照')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: '读取目标发布摘要'})).not.toBeNull()
+    expect(processReleasesApi.get).not.toHaveBeenCalled()
+    expect(processMigrationPreflightApi.get).not.toHaveBeenCalled()
+  })
+
+  it('pins the displayed target digest before the explicit structure-only preflight', async () => {
+    const currentAccess = auth()
+    current = {...currentAccess, allows: resource => resource === 'tianji.page.processReleases' || currentAccess.allows(resource)}
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValue(snapshot())
+    const pin = 'a'.repeat(64)
+    vi.mocked(processReleasesApi.get).mockResolvedValue({releaseVersion: 'release-2',
+      manifestSha256: pin, createdAt: OBSERVED, models: []})
+    const report: ProcessMigrationPreflight = {instanceId: receipt.instanceId, sourceReleaseVersion: 'release-1',
+      targetReleaseVersion: 'release-2', activityId: 'waitForExpiry', status: 'NATIVE_STRUCTURE_VALIDATED_ONLY', observedAt: OBSERVED}
+    vi.mocked(processMigrationPreflightApi.get).mockResolvedValue(report)
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+    await screen.findByText('来源：Process 实例快照')
+    edit('预检目标发布版本', 'release-2')
+    expect(screen.queryByRole('button', {name: '运行迁移预检'})).toBeNull()
+    fireEvent.click(screen.getByRole('button', {name: '读取目标发布摘要'}))
+    expect(await screen.findByText('目标清单 SHA-256：' + pin)).toBeInTheDocument()
+    expect(processReleasesApi.get).toHaveBeenCalledExactlyOnceWith('20', 'release-2', expect.any(AbortSignal))
+    expect(processMigrationPreflightApi.get).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', {name: '运行迁移预检'}))
+    expect(await screen.findByText('仅原生结构校验通过')).toBeInTheDocument()
+    expect(processMigrationPreflightApi.get).toHaveBeenCalledExactlyOnceWith('20',
+      {instanceId: receipt.instanceId, sourceReleaseVersion: 'release-1', targetReleaseVersion: 'release-2',
+        expectedTargetManifestSha256: pin}, expect.any(AbortSignal))
+    expect(screen.queryByRole('button', {name: '执行迁移'})).toBeNull()
+    edit('预检目标发布版本', 'release-3')
+    expect(screen.queryByText('仅原生结构校验通过')).toBeNull()
+    expect(screen.queryByText('目标清单 SHA-256：' + pin)).toBeNull()
+  })
+
+  it('aborts and discards a late target release after the user changes the version', async () => {
+    const currentAccess = auth()
+    current = {...currentAccess, allows: resource => resource === 'tianji.page.processReleases' || currentAccess.allows(resource)}
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValue(snapshot())
+    let resolve: ((value: Awaited<ReturnType<typeof processReleasesApi.get>>) => void) | undefined
+    let signal: AbortSignal | undefined
+    vi.mocked(processReleasesApi.get).mockImplementation((_tenant, _version, request) => {
+      signal = request
+      return new Promise(finish => {resolve = finish})
+    })
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+    await screen.findByText('来源：Process 实例快照')
+    edit('预检目标发布版本', 'release-2')
+    fireEvent.click(screen.getByRole('button', {name: '读取目标发布摘要'}))
+    await waitFor(() => expect(signal).toBeDefined())
+    edit('预检目标发布版本', 'release-3')
+    expect(signal?.aborted).toBe(true)
+    await act(async () => {resolve?.({releaseVersion: 'release-2', manifestSha256: 'a'.repeat(64), createdAt: OBSERVED, models: []})})
+    expect(screen.queryByRole('button', {name: '运行迁移预检'})).toBeNull()
+    expect(processMigrationPreflightApi.get).not.toHaveBeenCalled()
+  })
+
+  it('keeps preflight unavailable without the current release read permission', async () => {
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValue(snapshot())
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+    expect(await screen.findByText('来源：Process 实例快照')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: '读取目标发布摘要'})).toBeNull()
+    expect(processReleasesApi.get).not.toHaveBeenCalled()
   })
 
   it('submits an exact current-tenant correlation window only on explicit query', async () => {
