@@ -1,12 +1,17 @@
 import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Form, Input, Space, Table, Typography, type TableColumnsType} from 'antd'
 import {useLayoutEffect, useRef, useState} from 'react'
+import {Link} from 'react-router-dom'
+import {agentApi, type AgentRun, type AgentRunPage} from '../api/agent'
 import {isProcessCorrelationId, isProcessCorrelationQuery, isProcessCorrelationUtc, processCorrelationsApi,
   type ProcessCorrelationPage, type ProcessCorrelationQuery, type ProcessCorrelationReceipt,
   type ProcessInstanceSnapshot} from '../api/processCorrelations'
 import {useAuth} from '../auth/AuthContext'
+import {StatusTag} from './AgentRunsPage'
 
 const PAGE = 'tianji.page.processCorrelations'
+const AGENT_PAGE = 'tianji.page.runs'
+const AGENT_DETAIL = 'tianji.page.runDetail'
 const TIME_EXAMPLE = '2026-11-05T00:00:00Z'
 const INVALID_UTC = '请输入有效的 UTC 时间。'
 const INVALID_WINDOW = '请输入有效且不超过 31 天的 UTC 查询时间窗。'
@@ -19,6 +24,10 @@ type DetailState = {phase: 'idle' | 'loading'}
   | {phase: 'snapshot'; snapshot: ProcessInstanceSnapshot}
   | {phase: 'error'; message: string}
 type PendingRead = {kind: 'list' | 'detail'; controller: AbortController}
+type AgentListState = {phase: 'idle' | 'loading'}
+  | {phase: 'page'; page: AgentRunPage}
+  | {phase: 'error'; message: string}
+
 
 function UtcTime({value}: {value: string}) {
   return <time dateTime={value}>{value} UTC</time>
@@ -50,6 +59,7 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
   const [form] = Form.useForm<LookupForm>()
   const [list, setList] = useState<ListState>({phase: 'idle'})
   const [detail, setDetail] = useState<DetailState>({phase: 'idle'})
+  const [agentWindow, setAgentWindow] = useState<LookupForm>()
   const read = useRef<PendingRead | null>(null)
   const sequence = useRef(0)
 
@@ -68,6 +78,7 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
       {name: 'toExclusive', errors: []}])
     setList({phase: 'idle'})
     setDetail({phase: 'idle'})
+    setAgentWindow(undefined)
   }
 
   const beginRead = (kind: PendingRead['kind']) => {
@@ -92,11 +103,16 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
     setDetail({phase: 'idle'})
     try {
       const page = await processCorrelationsApi.list(tenant, query, request.signal)
-      if (request.isCurrent()) setList({phase: 'page', query, page})
+      if (request.isCurrent()) {
+        setList({phase: 'page', query, page})
+        const {correlationId, fromInclusive, toExclusive} = query
+        setAgentWindow({correlationId, fromInclusive, toExclusive})
+      }
     } catch (failure) {
       if (!request.isCurrent()) return
       if (authFailed(failure)) {
         setList({phase: 'idle'})
+        setAgentWindow(undefined)
         return
       }
       setList({phase: 'error', message: query.cursor
@@ -133,6 +149,7 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
       if (authFailed(failure)) {
         setList({phase: 'idle'})
         setDetail({phase: 'idle'})
+        setAgentWindow(undefined)
         return
       }
       setDetail({phase: 'error', message: failure instanceof ApiError && failure.status === 404
@@ -207,5 +224,57 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
           ? '未记录' : <UtcTime value={detail.snapshot.finishedAt} />}</Typography.Text>
       </Space>
     </Card>}
+    {agentWindow && allows(AGENT_PAGE) && <OwnerAgentCorrelationLookup tenant={tenant} query={agentWindow} />}
   </section>
+}
+
+
+function OwnerAgentCorrelationLookup({tenant, query}: {tenant: string; query: LookupForm}) {
+  const {allows} = useAuth()
+  const [state, setState] = useState<AgentListState>({phase: 'idle'})
+  const pending = useRef<AbortController | null>(null)
+
+  useLayoutEffect(() => () => {
+    pending.current?.abort()
+    pending.current = null
+  }, [])
+
+  const load = async (cursor?: string) => {
+    if (pending.current || !allows(AGENT_PAGE)) return
+    const controller = new AbortController()
+    pending.current = controller
+    const isCurrent = () => pending.current === controller && !controller.signal.aborted && allows(AGENT_PAGE)
+    setState({phase: 'loading'})
+    try {
+      const page = await agentApi.listByCorrelation(tenant, cursor === undefined ? query : {...query, cursor}, controller.signal)
+      if (isCurrent()) setState({phase: 'page', page})
+    } catch (failure) {
+      if (!isCurrent()) return
+      setState({phase: 'error', message: authFailed(failure) ? '当前无法读取 Agent 运行。'
+        : cursor === undefined ? '暂时无法读取 Agent 运行。' : '暂时无法读取下一页 Agent 运行，请重新查询。'})
+    } finally {
+      if (pending.current === controller) pending.current = null
+    }
+  }
+
+  const columns: TableColumnsType<AgentRun> = [
+    {title: 'Agent 运行标识', dataIndex: 'runId', render: (_, run) => allows(AGENT_DETAIL)
+      ? <Link to={'/runs/' + encodeURIComponent(run.runId)}>{run.runId}</Link> : run.runId},
+    {title: '运行状态', key: 'status', render: (_, run) => <StatusTag status={run.status} />},
+    {title: '创建时间', key: 'createdAt', render: (_, run) => <UtcTime value={run.createdAt} />},
+  ]
+  const nextCursor = state.phase === 'page' ? state.page.nextCursor : null
+
+  return <Card variant="borderless" className="surface-card" title="同关联标识的当前身份 Agent 运行">
+    <Space orientation="vertical" className="full-width">
+      <Typography.Text type="secondary">来源：Agent 运行记录</Typography.Text>
+      <Typography.Text type="secondary">按同一标识和时间窗独立查询当前身份的运行记录。</Typography.Text>
+      <Button disabled={state.phase === 'loading'} onClick={() => void load()}>查询同关联标识的 Agent 运行</Button>
+      {state.phase === 'loading' && <div role="status">正在查询当前身份的 Agent 运行</div>}
+      {state.phase === 'error' && <Alert type="warning" showIcon title={state.message} />}
+      {state.phase === 'page' && <Table<AgentRun> rowKey="runId" dataSource={state.page.items}
+        columns={columns} pagination={false} scroll={{x: 620}} locale={{emptyText: '当前时间窗无同关联标识的 Agent 运行'}} />}
+      {nextCursor !== null && <Button onClick={() => void load(nextCursor)}>下一页 Agent 运行</Button>}
+    </Space>
+  </Card>
 }

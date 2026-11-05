@@ -1,28 +1,44 @@
 import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {act, fireEvent, render, screen, waitFor} from '@testing-library/react'
+import {MemoryRouter} from 'react-router-dom'
 import {beforeEach, describe, expect, it, vi} from 'vitest'
+import {agentApi, type AgentRunPage} from '../api/agent'
 import {processCorrelationsApi, type ProcessCorrelationPage, type ProcessInstanceSnapshot} from '../api/processCorrelations'
 import {useAuth} from '../auth/AuthContext'
-import {authorization} from '../test/fixtures'
+import {authorization, run} from '../test/fixtures'
 import ExecutionTimelinePage from './ExecutionTimelinePage'
 
 vi.mock('../auth/AuthContext', () => ({useAuth: vi.fn()}))
+vi.mock('../api/agent', () => ({agentApi: {listByCorrelation: vi.fn()}}))
 vi.mock('../api/processCorrelations', async () => {
   const actual = await vi.importActual<typeof import('../api/processCorrelations')>('../api/processCorrelations')
   return {...actual, processCorrelationsApi: {list: vi.fn(), detail: vi.fn()}}
 })
 
 const PAGE = 'tianji.page.processCorrelations'
+const AGENT_PAGE = 'tianji.page.runs'
+const AGENT_DETAIL = 'tianji.page.runDetail'
+const AGENT_QUERY_BUTTON = '查询同关联标识的 Agent 运行'
 const FROM = '2026-11-05T10:00:00.001Z'
 const UNTIL = '2026-11-05T11:00:00Z'
 const CORRELATION = 'trace:expense-1'
+const AGENT_NEXT = '下一页 Agent 运行'
+const AGENT_SOURCE = '来源：Agent 运行记录'
+const AGENT_LOADING = '正在查询当前身份的 Agent 运行'
+const RUN_CREATED = '2026-11-05T10:00:01.123456Z'
+const agentRun = (id = 'run-owned') => ({...run(id, 'WAITING'), createdAt: RUN_CREATED})
+const agentPage = (): AgentRunPage => ({items: [agentRun()], nextCursor: null})
+const query = {correlationId: CORRELATION, fromInclusive: FROM, toExclusive: UNTIL}
+const screenWithRouter = () => <MemoryRouter><ExecutionTimelinePage /></MemoryRouter>
+const findAgentButton = () => screen.findByRole('button', {name: AGENT_QUERY_BUTTON})
 const receipt = {instanceId: 'instance-1', releaseVersion: 'release-1', submittedAt: '2026-11-05T10:30:00.123456Z'}
 const page = (correlationId = CORRELATION): ProcessCorrelationPage =>
   ({correlationId, observedAt: '2026-11-05T11:00:01.123456Z', items: [receipt], nextCursor: null})
-const auth = (tenant = '20', allowed = true, epoch?: number): ReturnType<typeof useAuth> => {
-  const frame = authorization(tenant, ['TIANJI_PROCESS_READ'])
+const auth = (tenant = '20', allowed = true, epoch?: number, agent = false, detail = agent): ReturnType<typeof useAuth> => {
+  const frame = authorization(tenant, agent ? ['TIANJI_PROCESS_READ', 'TIANJI_AGENT_READ'] : ['TIANJI_PROCESS_READ'])
   return {status: 'ready', authorization: {...frame, binding: {...frame.binding, requestEpoch: epoch ?? frame.binding.requestEpoch}},
-    allows: resource => resource === PAGE && allowed, login: () => {}, logout: async () => {}, retry: async () => {}}
+    allows: resource => resource === PAGE ? allowed : resource === AGENT_PAGE ? agent : resource === AGENT_DETAIL && detail,
+    login: () => {}, logout: async () => {}, retry: async () => {}}
 }
 const snapshot = (): ProcessInstanceSnapshot => ({
   ...receipt, definitionKey: 'expense', businessKey: 'business-1', correlationId: CORRELATION,
@@ -43,6 +59,7 @@ describe('Process correlation page', () => {
     current = auth()
     vi.mocked(useAuth).mockImplementation(() => current)
     vi.mocked(processCorrelationsApi.list).mockImplementation(async (_, query) => page(query.correlationId))
+    vi.mocked(agentApi.listByCorrelation).mockResolvedValue(agentPage())
   })
 
   it('submits an exact current-tenant correlation window only on explicit query', async () => {
@@ -56,6 +73,146 @@ describe('Process correlation page', () => {
     await waitFor(() => expect(processCorrelationsApi.list).toHaveBeenCalledExactlyOnceWith('20',
       {correlationId: CORRELATION, fromInclusive: FROM, toExclusive: UNTIL}, expect.any(AbortSignal)))
   })
+  it('offers an explicit Agent lookup only after an authorized Process result', async () => {
+    current = auth('20', true, undefined, true)
+    render(screenWithRouter())
+    expect(screen.queryByRole('button', {name: AGENT_QUERY_BUTTON})).not.toBeInTheDocument()
+    fillWindow()
+    expect(agentApi.listByCorrelation).not.toHaveBeenCalled()
+    submit()
+    await screen.findByText('来源：Process START 回执')
+    const button = screen.getByRole('button', {name: AGENT_QUERY_BUTTON})
+    expect(agentApi.listByCorrelation).not.toHaveBeenCalled()
+    fireEvent.click(button)
+    expect(await screen.findByRole('link', {name: 'run-owned'})).toHaveAttribute('href', '/runs/run-owned')
+    expect(screen.getByText(AGENT_SOURCE)).toBeInTheDocument()
+    expect(screen.getByText('等待中')).toBeInTheDocument()
+    expect(screen.getByText(RUN_CREATED + ' UTC')).toHaveAttribute('dateTime', RUN_CREATED)
+    expect(screen.getByText('来源：Process START 回执')).toBeInTheDocument()
+    expect(agentApi.listByCorrelation).toHaveBeenCalledExactlyOnceWith('20', query, expect.any(AbortSignal))
+    expect(processCorrelationsApi.detail).not.toHaveBeenCalled()
+  })
+
+  it('keeps the Agent action and calls absent for Process-only access', async () => {
+    render(<ExecutionTimelinePage />)
+    fillWindow()
+    submit()
+    await screen.findByText('来源：Process START 回执')
+    expect(screen.queryByRole('button', {name: AGENT_QUERY_BUTTON})).not.toBeInTheDocument()
+    expect(screen.queryByText(AGENT_SOURCE)).not.toBeInTheDocument()
+    expect(agentApi.listByCorrelation).not.toHaveBeenCalled()
+  })
+
+  it('only links returned runs when the existing detail resource allows it', async () => {
+    current = auth('20', true, undefined, true, false)
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await findAgentButton())
+    expect(await screen.findByText('run-owned')).toBeInTheDocument()
+    expect(screen.queryByRole('link', {name: 'run-owned'})).not.toBeInTheDocument()
+  })
+
+  it('navigates the two source pages independently and never sends a Process cursor to Agent', async () => {
+    current = auth('20', true, undefined, true)
+    const processFirst: ProcessCorrelationPage = {...page(), nextCursor: 'v1.YQ'}
+    const processSecond = {...page(), items: [{...receipt, instanceId: 'process-next'}]}
+    const processThird = {...page(), items: [{...receipt, instanceId: 'process-last'}]}
+    vi.mocked(processCorrelationsApi.list).mockResolvedValueOnce(processFirst)
+      .mockResolvedValueOnce({...processSecond, nextCursor: 'v1.Yg'}).mockResolvedValueOnce(processThird)
+    vi.mocked(agentApi.listByCorrelation).mockResolvedValueOnce({
+      items: Array.from({length: 20}, (_, index) => agentRun('run-' + (20 - index))),
+      nextCursor: 'v1.YWdlbnQ',
+    }).mockResolvedValueOnce({items: [], nextCursor: null})
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '下一页'}))
+    await screen.findByText('process-next')
+    fireEvent.click(await findAgentButton())
+    expect(await screen.findByRole('link', {name: 'run-20'})).toBeInTheDocument()
+    expect(agentApi.listByCorrelation).toHaveBeenNthCalledWith(1, '20', query, expect.any(AbortSignal))
+    fireEvent.click(screen.getByRole('button', {name: '下一页'}))
+    await screen.findByText('process-last')
+    expect(screen.getByRole('link', {name: 'run-20'})).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: AGENT_NEXT}))
+    expect(await screen.findByText('当前时间窗无同关联标识的 Agent 运行')).toBeInTheDocument()
+    expect(screen.queryByRole('link', {name: 'run-20'})).not.toBeInTheDocument()
+    expect(screen.getByText('process-last')).toBeInTheDocument()
+    expect(processCorrelationsApi.list).toHaveBeenCalledTimes(3)
+    expect(agentApi.listByCorrelation).toHaveBeenNthCalledWith(2, '20',
+      {...query, cursor: 'v1.YWdlbnQ'}, expect.any(AbortSignal))
+  })
+
+  it.each([
+    ['dependency failure', new Error('private Agent endpoint failure'), '暂时无法读取 Agent 运行。'],
+    ['still-current mocked denial', new ApiError('private Agent denial', 403, 'TIANJI_PERMISSION_DENIED'), '当前无法读取 Agent 运行。'],
+  ] as const)('keeps Process results and details after an Agent %s', async (_, failure, message) => {
+    current = auth('20', true, undefined, true)
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValue(snapshot())
+    vi.mocked(agentApi.listByCorrelation).mockRejectedValueOnce(failure)
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+    await screen.findByText('来源：Process 实例快照')
+    fireEvent.click(await findAgentButton())
+    expect(await screen.findByText(message)).toBeInTheDocument()
+    expect(screen.getByText('来源：Process START 回执')).toBeInTheDocument()
+    expect(screen.getByText('来源：Process 实例快照')).toBeInTheDocument()
+    expect(screen.queryByText(/private Agent/)).not.toBeInTheDocument()
+  })
+
+  it('aborts the pending Agent lookup on a shared query edit and discards a late page', async () => {
+    current = auth('20', true, undefined, true)
+    let complete!: (value: AgentRunPage) => void
+    vi.mocked(agentApi.listByCorrelation).mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await findAgentButton())
+    expect(await screen.findByText(AGENT_LOADING)).toBeInTheDocument()
+    const signal = vi.mocked(agentApi.listByCorrelation).mock.calls[0][2]
+    const button = await findAgentButton()
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(agentApi.listByCorrelation).toHaveBeenCalledTimes(1)
+    edit('结束时间（UTC，不含）', '2026-11-05T11:01:00Z')
+    expect(signal?.aborted).toBe(true)
+    expect(screen.queryByRole('button', {name: AGENT_QUERY_BUTTON})).not.toBeInTheDocument()
+    await act(async () => { complete(agentPage()) })
+    expect(screen.queryByText('run-owned')).not.toBeInTheDocument()
+    submit()
+    await findAgentButton()
+    expect(agentApi.listByCorrelation).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['same-epoch Agent permission loss', auth(), true],
+    ['changed request epoch', auth('20', true, 81, true), false],
+    ['changed tenant', auth('21', true, undefined, true), false],
+    ['shared sign-out', {...auth(), status: 'signed-out', authorization: undefined}, false],
+  ] as const)('aborts Agent on %s and protects both scope views', async (_, next, preserveProcess) => {
+    current = auth('20', true, undefined, true)
+    let complete!: (value: AgentRunPage) => void
+    vi.mocked(agentApi.listByCorrelation).mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    const tree = render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await findAgentButton())
+    await screen.findByText(AGENT_LOADING)
+    const signal = vi.mocked(agentApi.listByCorrelation).mock.calls[0][2]
+    current = next
+    tree.rerender(screenWithRouter())
+    expect(signal?.aborted).toBe(true)
+    await act(async () => { complete(agentPage()) })
+    expect(screen.queryByText('run-owned')).not.toBeInTheDocument()
+    expect(screen.queryByText(AGENT_SOURCE)).not.toBeInTheDocument()
+    if (preserveProcess) expect(screen.getByText('来源：Process START 回执')).toBeInTheDocument()
+    else expect(screen.queryByText('来源：Process START 回执')).not.toBeInTheDocument()
+    expect(agentApi.listByCorrelation).toHaveBeenCalledTimes(1)
+  })
+
   it('blocks access before rendering the lookup or issuing reads', () => {
     current = auth('20', false)
     render(<ExecutionTimelinePage />)

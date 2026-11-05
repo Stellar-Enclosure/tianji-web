@@ -1,4 +1,5 @@
 import {requestJson} from './client'
+import {isProcessCorrelationQuery, isProcessCorrelationUtc, type ProcessCorrelationQuery} from './processCorrelations'
 
 export const RUN_STATUSES = ['CREATED', 'QUEUED', 'RUNNING', 'WAITING', 'SUSPENDED',
   'COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'] as const
@@ -110,6 +111,47 @@ const pathFor = (runId: string): string => {
 }
 const invalid = (): never => { throw new Error('服务返回的数据格式无效') }
 
+const FILTERED_PAGE_SIZE = 20
+const FILTERED_CURSOR = /^v1\.[A-Za-z0-9_-]{1,253}(?![\s\S])/
+const FILTERED_RUN_FIELDS = ['runId', 'definitionKey', 'definitionVersion', 'sessionId', 'status',
+  'waitReason', 'cancelRequested', 'attempt', 'revision', 'lastEventSequence', 'deadlineAt', 'createdAt', 'finishedAt']
+
+const isFilteredCursor = (value: unknown): value is string =>
+  typeof value === 'string' && FILTERED_CURSOR.test(value)
+
+const utcSortKey = (value: string): string => {
+  const [seconds, fraction = ''] = value.slice(0, -1).split('.')
+  return seconds + '.' + fraction.padEnd(6, '0')
+}
+
+const invalidFilteredPage = (): never => { throw new Error('服务返回的 Agent 关联运行无效') }
+
+function filteredPage(value: unknown, query: ProcessCorrelationQuery): AgentRunPage {
+  if (!record(value) || Object.keys(value).length !== 2 || !Object.hasOwn(value, 'items')
+      || !Object.hasOwn(value, 'nextCursor') || !Array.isArray(value.items) || value.items.length > FILTERED_PAGE_SIZE
+      || (value.nextCursor !== null && (!isFilteredCursor(value.nextCursor)
+        || value.items.length !== FILTERED_PAGE_SIZE || value.nextCursor === query.cursor))) return invalidFilteredPage()
+
+  const from = utcSortKey(query.fromInclusive), to = utcSortKey(query.toExclusive)
+  const seen = new Set<string>()
+  const items: AgentRun[] = []
+  let previousTime: string | undefined
+  let previousId = ''
+  for (const item of value.items) {
+    if (!isAgentRun(item) || Object.keys(item).length !== FILTERED_RUN_FIELDS.length
+        || !FILTERED_RUN_FIELDS.every(field => Object.hasOwn(item, field)) || item.runId.length > 64
+        || !isProcessCorrelationUtc(item.createdAt) || seen.has(item.runId)) return invalidFilteredPage()
+    const time = utcSortKey(item.createdAt)
+    if (time < from || time >= to || (previousTime !== undefined
+        && (time > previousTime || (time === previousTime && item.runId >= previousId)))) return invalidFilteredPage()
+    seen.add(item.runId)
+    previousTime = time
+    previousId = item.runId
+    items.push(item)
+  }
+  return {items, nextCursor: value.nextCursor}
+}
+
 export const agentApi = {
   async list(tenant: string, cursor?: string, signal?: AbortSignal): Promise<AgentRunPage> {
     const query = new URLSearchParams({limit: '20'})
@@ -118,6 +160,19 @@ export const agentApi = {
     if (!record(value) || !Array.isArray(value.items) || value.items.length > 100
       || !value.items.every(isAgentRun) || !(value.nextCursor === null || text(value.nextCursor, 256))) return invalid()
     return {items: value.items, nextCursor: value.nextCursor}
+  },
+  async listByCorrelation(tenant: string, query: ProcessCorrelationQuery, signal?: AbortSignal): Promise<AgentRunPage> {
+    if (!isProcessCorrelationQuery(query) || (query.cursor !== undefined && !isFilteredCursor(query.cursor))) {
+      throw new Error('Agent 关联查询条件无效')
+    }
+    const captured = {...query}
+    const parameters = new URLSearchParams({
+      correlationId: captured.correlationId, fromInclusive: captured.fromInclusive, toExclusive: captured.toExclusive,
+    })
+    if (captured.cursor !== undefined) parameters.set('cursor', captured.cursor)
+    const value = await requestJson<unknown>(BASE + '?' + parameters.toString(), tenant,
+      {method: 'GET', cache: 'no-store', signal})
+    return filteredPage(value, captured)
   },
   async get(tenant: string, runId: string, signal?: AbortSignal): Promise<AgentRun> {
     const value = await requestJson<unknown>(pathFor(runId), tenant, {signal})
