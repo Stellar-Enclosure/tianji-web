@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "releaseVersion": "expense-v1",
+  "models": {
+    "BPMN": {
+      "definitionKey": "expenseReview",
+      "sha256": "5957151c2760507749f0b68763863dde4e42466261e63de10627e1d48ed1c1b6"
+    },
+    "DMN": {
+      "definitionKey": "expenseRouting",
+      "sha256": "94cbd131a086c5e2a87240e99e0c7c88b267d946c184e5c7c1f3bfd694feba74"
+    },
+    "CMMN": {
+      "definitionKey": "expenseException",
+      "sha256": "c2bc0015fcc709b1bd568b635737b4fc7feff80fe343622a9efdc1c9a02f49c1"
+    }
+  },
+  "startInputs": {
+    "operationId": "STRING",
+    "amount": "INTEGER"
+  },
+  "paths": {
+    "NORMAL": {
+      "amount": 100,
+      "ruleId": "smallExpense",
+      "reviewLane": "standard"
+    },
+    "AGENT_FAILURE": {
+      "amount": 700,
+      "ruleId": "smallExpense",
+      "reviewLane": "standard"
+    },
+    "MANUAL_CASE": {
+      "amount": 1500,
+      "ruleId": "largeExpense",
+      "reviewLane": "exception"
+    },
+    "RECOVERY": {
+      "amount": 200,
+      "ruleId": "smallExpense",
+      "reviewLane": "standard"
+    }
+  },
+  "humanTask": {
+    "taskId": "expense-review-task-fixture",
+    "scopeType": "PROCESS",
+    "scopeId": "expense-process-fixture",
+    "releaseVersion": "expense-v1",
+    "definitionKey": "expenseReview",
+    "taskDefinitionKey": "reviewExpense",
+    "name": "Review expense",
+    "kind": "ACTION",
+    "approvalField": null,
+    "version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "lane": "exception",
+    "availableLanes": [
+      "exception",
+      "standard"
+    ],
+    "assigned": false,
+    "assignedToMe": false,
+    "suspended": false,
+    "formSchema": {
+      "finding": "STRING"
+    },
+    "createdAt": "2026-11-05T00:00:00.123456Z",
+    "dueAt": null
+  },
+  "caseInstance": {
+    "caseInstanceId": "expense-case-fixture",
+    "definitionKey": "expenseException",
+    "releaseVersion": "expense-v1",
+    "businessKey": "expense-business-fixture",
+    "correlationId": "expense-correlation-fixture",
+    "status": "ACTIVE",
+    "submittedAt": "2026-11-05T00:00:01.123456Z",
+    "finishedAt": null,
+    "planItems": [
+      {
+        "planItemInstanceId": "expense-primary-fixture",
+        "planItemDefinitionKey": "primaryTask",
+        "kind": "HUMAN_TASK",
+        "state": "COMPLETED",
+        "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "availableActions": []
+      },
+      {
+        "planItemInstanceId": "expense-supplemental-fixture",
+        "planItemDefinitionKey": "supplementalTask",
+        "kind": "HUMAN_TASK",
+        "state": "ENABLED",
+        "version": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "availableActions": [
+          "DISABLE",
+          "START"
+        ]
+      },
+      {
+        "planItemInstanceId": "expense-milestone-fixture",
+        "planItemDefinitionKey": "completionMilestone",
+        "kind": "MILESTONE",
+        "state": "AVAILABLE",
+        "version": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "availableActions": []
+      }
+    ]
+  }
+}
