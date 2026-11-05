@@ -1,8 +1,9 @@
 import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
-import {act, fireEvent, render, screen, waitFor} from '@testing-library/react'
+import {act, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
 import {MemoryRouter} from 'react-router-dom'
 import {beforeEach, describe, expect, it, vi} from 'vitest'
 import {agentApi, type AgentRunPage} from '../api/agent'
+import {processAgentOutcomesApi, type ProcessAgentOutcome, type ProcessAgentOutcomePage} from '../api/processAgentOutcomes'
 import {processCorrelationsApi, type ProcessCorrelationPage, type ProcessInstanceSnapshot} from '../api/processCorrelations'
 import {useAuth} from '../auth/AuthContext'
 import {authorization, run} from '../test/fixtures'
@@ -10,6 +11,7 @@ import ExecutionTimelinePage from './ExecutionTimelinePage'
 
 vi.mock('../auth/AuthContext', () => ({useAuth: vi.fn()}))
 vi.mock('../api/agent', () => ({agentApi: {listByCorrelation: vi.fn()}}))
+vi.mock('../api/processAgentOutcomes', () => ({processAgentOutcomesApi: {list: vi.fn()}}))
 vi.mock('../api/processCorrelations', async () => {
   const actual = await vi.importActual<typeof import('../api/processCorrelations')>('../api/processCorrelations')
   return {...actual, processCorrelationsApi: {list: vi.fn(), detail: vi.fn()}}
@@ -44,6 +46,21 @@ const snapshot = (): ProcessInstanceSnapshot => ({
   ...receipt, definitionKey: 'expense', businessKey: 'business-1', correlationId: CORRELATION,
   status: 'ACTIVE', finishedAt: null,
 })
+const OUTCOME_QUERY = '查询流程侧 Agent 结果'
+const OUTCOME_NEXT = '下一页流程侧 Agent 结果'
+const OUTCOME_SOURCE = '来源：Process 本地调度与结果收件记录'
+const OUTCOME_LOADING = '正在查询流程侧 Agent 结果'
+const OUTCOME_EMPTY = '此流程暂无本地 Agent 结果记录'
+const OUTCOME_CURSOR = 'v1.' + 'a'.repeat(64)
+const OBSERVED = '2026-11-05T11:00:02.123456Z'
+const outcome = (activityId = 'dispatchAgent'): ProcessAgentOutcome => ({
+  activityId, dispatchState: 'ACKNOWLEDGED', inboxState: 'APPLIED', terminalStatus: 'COMPLETED',
+  dispatchRecordedAt: '2026-11-05T10:31:00.123456Z', receivedAt: '2026-11-05T10:31:01.123456Z',
+  decidedAt: '2026-11-05T10:31:02.123456Z',
+})
+const outcomePage = (instanceId = receipt.instanceId, items: readonly ProcessAgentOutcome[] = [outcome()]): ProcessAgentOutcomePage =>
+  ({instanceId, observedAt: OBSERVED, items, nextCursor: null})
+const findOutcomeButton = () => screen.findByRole('button', {name: OUTCOME_QUERY})
 let current = auth()
 const edit = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), {target: {value}})
 const submit = () => fireEvent.click(screen.getByRole('button', {name: '查询关联'}))
@@ -60,6 +77,7 @@ describe('Process correlation page', () => {
     vi.mocked(useAuth).mockImplementation(() => current)
     vi.mocked(processCorrelationsApi.list).mockImplementation(async (_, query) => page(query.correlationId))
     vi.mocked(agentApi.listByCorrelation).mockResolvedValue(agentPage())
+    vi.mocked(processAgentOutcomesApi.list).mockImplementation(async (_, instanceId) => outcomePage(instanceId))
   })
 
   it('submits an exact current-tenant correlation window only on explicit query', async () => {
@@ -256,6 +274,183 @@ describe('Process correlation page', () => {
     expect(screen.queryByText('instance-20')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', {name: '下一页'})).not.toBeInTheDocument()
     expect(processCorrelationsApi.detail).not.toHaveBeenCalled()
+  })
+
+  it('offers an explicit Process Agent outcome lookup only after current detail succeeds', async () => {
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValueOnce(snapshot())
+    vi.mocked(processAgentOutcomesApi.list).mockResolvedValueOnce(outcomePage(receipt.instanceId, [
+      outcome(), {...outcome(), dispatchState: 'CLOSED', inboxState: 'DEAD', terminalStatus: null},
+    ]))
+    render(<ExecutionTimelinePage />)
+    expect(screen.queryByRole('button', {name: OUTCOME_QUERY})).not.toBeInTheDocument()
+    fillWindow()
+    submit()
+    const detail = await screen.findByRole('button', {name: '查看详情'})
+    expect(screen.queryByRole('button', {name: OUTCOME_QUERY})).not.toBeInTheDocument()
+    fireEvent.click(detail)
+    await screen.findByText('来源：Process 实例快照')
+    const button = await findOutcomeButton()
+    expect(processAgentOutcomesApi.list).not.toHaveBeenCalled()
+    fireEvent.click(button)
+
+    const header = await screen.findByRole('columnheader', {name: '已记录的 Agent 终态'})
+    const table = header.closest('table')
+    if (!table) throw new Error('Expected an outcome table')
+    const [, applied, dead] = within(table).getAllByRole('row')
+    expect(within(applied).getByText('ACKNOWLEDGED')).toBeInTheDocument()
+    expect(within(applied).getByText('APPLIED')).toBeInTheDocument()
+    expect(within(applied).getByText('COMPLETED')).toBeInTheDocument()
+    expect(within(dead).getByText('CLOSED')).toBeInTheDocument()
+    expect(within(dead).getByText('DEAD')).toBeInTheDocument()
+    expect(within(dead).getByText('未记录')).toBeInTheDocument()
+    expect(within(table).getAllByText('dispatchAgent')).toHaveLength(2)
+    expect(within(table).queryByRole('link')).not.toBeInTheDocument()
+    expect(within(table).queryByText('FAILED')).not.toBeInTheDocument()
+    expect(screen.getByText(OUTCOME_SOURCE)).toBeInTheDocument()
+    expect(screen.getByText(OBSERVED + ' UTC')).toHaveAttribute('dateTime', OBSERVED)
+    expect(within(applied).getByText(outcome().dispatchRecordedAt + ' UTC')).toHaveAttribute('dateTime', outcome().dispatchRecordedAt)
+    expect(screen.getByText('来源：Process START 回执')).toBeInTheDocument()
+    expect(screen.getByText('来源：Process 实例快照')).toBeInTheDocument()
+    expect(processAgentOutcomesApi.list).toHaveBeenCalledExactlyOnceWith('20', receipt.instanceId, undefined, expect.any(AbortSignal))
+    expect(agentApi.listByCorrelation).not.toHaveBeenCalled()
+  })
+
+  it('keeps the Process Agent outcome control absent after failed or pending Process detail', async () => {
+    let fail!: (reason: unknown) => void
+    vi.mocked(processCorrelationsApi.detail).mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    render(<ExecutionTimelinePage />)
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+    expect(await screen.findByText('正在读取流程实例详情')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: OUTCOME_QUERY})).not.toBeInTheDocument()
+    await act(async () => { fail(new ApiError('private detail', 404, 'TIANJI_RESOURCE_NOT_FOUND')) })
+    expect(screen.getByText('当前无法读取该流程实例详情。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: OUTCOME_QUERY})).not.toBeInTheDocument()
+    expect(processAgentOutcomesApi.list).not.toHaveBeenCalled()
+  })
+
+  it('uses only the returned Process outcome cursor and keeps the independent views', async () => {
+    current = auth('20', true, undefined, true)
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValueOnce(snapshot())
+    const first: ProcessAgentOutcomePage = {...outcomePage(receipt.instanceId,
+      Array.from({length: 20}, (_, index) => outcome('outcome-' + index))), nextCursor: OUTCOME_CURSOR}
+    vi.mocked(processAgentOutcomesApi.list).mockResolvedValueOnce(first).mockResolvedValueOnce(outcomePage(receipt.instanceId, []))
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await findAgentButton())
+    expect(await screen.findByRole('link', {name: 'run-owned'})).toHaveAttribute('href', '/runs/run-owned')
+    fireEvent.click(screen.getByRole('button', {name: '查看详情'}))
+    fireEvent.click(await findOutcomeButton())
+    expect(await screen.findByText('outcome-0')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: OUTCOME_NEXT}))
+    expect(await screen.findByText(OUTCOME_EMPTY)).toBeInTheDocument()
+    expect(screen.queryByText('outcome-0')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: OUTCOME_NEXT})).not.toBeInTheDocument()
+    expect(screen.getByText('来源：Process START 回执')).toBeInTheDocument()
+    expect(screen.getByText('来源：Process 实例快照')).toBeInTheDocument()
+    expect(screen.getByRole('link', {name: 'run-owned'})).toBeInTheDocument()
+    expect(processAgentOutcomesApi.list).toHaveBeenNthCalledWith(1, '20', receipt.instanceId, undefined, expect.any(AbortSignal))
+    expect(processAgentOutcomesApi.list).toHaveBeenNthCalledWith(2, '20', receipt.instanceId, OUTCOME_CURSOR, expect.any(AbortSignal))
+    expect(processCorrelationsApi.list).toHaveBeenCalledTimes(1)
+    expect(agentApi.listByCorrelation).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps other source results on a stale outcome cursor and explicitly restarts without it', async () => {
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValueOnce(snapshot())
+    vi.mocked(processAgentOutcomesApi.list).mockResolvedValueOnce({
+      ...outcomePage(receipt.instanceId, Array.from({length: 20}, (_, index) => outcome('outcome-' + index))),
+      nextCursor: OUTCOME_CURSOR,
+    }).mockRejectedValueOnce(new ApiError('private invalid cursor', 400, 'TIANJI_INVALID_COMMAND'))
+    render(<ExecutionTimelinePage />)
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+    fireEvent.click(await findOutcomeButton())
+    fireEvent.click(await screen.findByRole('button', {name: OUTCOME_NEXT}))
+    expect(await screen.findByText('流程侧 Agent 结果分页已失效，请重新查询。')).toBeInTheDocument()
+    expect(screen.queryByText('private invalid cursor')).not.toBeInTheDocument()
+    expect(screen.getByText('来源：Process START 回执')).toBeInTheDocument()
+    expect(screen.getByText('来源：Process 实例快照')).toBeInTheDocument()
+    fireEvent.click(await findOutcomeButton())
+    expect(await screen.findByText('dispatchAgent')).toBeInTheDocument()
+    expect(processAgentOutcomesApi.list).toHaveBeenNthCalledWith(3, '20', receipt.instanceId, undefined, expect.any(AbortSignal))
+  })
+
+  it.each([
+    [404, 'TIANJI_RESOURCE_NOT_FOUND', '当前无法读取此流程的 Agent 结果。'],
+    [503, 'TIANJI_DEPENDENCY_UNAVAILABLE', '暂时无法读取此流程的 Agent 结果。'],
+    [403, 'TIANJI_PERMISSION_DENIED', '当前身份无法读取流程侧 Agent 结果。'],
+  ] as const)('keeps still-authorized Process and own Agent views on outcome API %s', async (status, code, message) => {
+    current = auth('20', true, undefined, true)
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValueOnce(snapshot())
+    vi.mocked(processAgentOutcomesApi.list).mockRejectedValueOnce(new ApiError('private outcome diagnostic', status, code))
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await findAgentButton())
+    await screen.findByRole('link', {name: 'run-owned'})
+    fireEvent.click(screen.getByRole('button', {name: '查看详情'}))
+    fireEvent.click(await findOutcomeButton())
+    expect(await screen.findByText(message)).toBeInTheDocument()
+    expect(screen.queryByText('private outcome diagnostic')).not.toBeInTheDocument()
+    expect(screen.queryByText(OUTCOME_EMPTY)).not.toBeInTheDocument()
+    expect(screen.getByText('来源：Process START 回执')).toBeInTheDocument()
+    expect(screen.getByText('来源：Process 实例快照')).toBeInTheDocument()
+    expect(screen.getByRole('link', {name: 'run-owned'})).toBeInTheDocument()
+  })
+
+  it.each([false, true])('cancels pending outcomes on detail reselection, same instance=%s', async same => {
+    const nextReceipt = {...receipt, instanceId: 'instance-2'}
+    const nextSnapshot = {...snapshot(), ...nextReceipt}
+    const selected = same ? snapshot() : nextSnapshot
+    vi.mocked(processCorrelationsApi.list).mockResolvedValueOnce({...page(), items: [receipt, nextReceipt]})
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValueOnce(snapshot()).mockResolvedValueOnce(selected)
+    let complete!: (value: ProcessAgentOutcomePage) => void
+    vi.mocked(processAgentOutcomesApi.list).mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    render(<ExecutionTimelinePage />)
+    fillWindow()
+    submit()
+    fireEvent.click((await screen.findAllByRole('button', {name: '查看详情'}))[0])
+    fireEvent.click(await findOutcomeButton())
+    expect(await screen.findByText(OUTCOME_LOADING)).toBeInTheDocument()
+    const button = await findOutcomeButton()
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(processAgentOutcomesApi.list).toHaveBeenCalledTimes(1)
+    const signal = vi.mocked(processAgentOutcomesApi.list).mock.calls[0][3]
+    fireEvent.click(screen.getAllByRole('button', {name: '查看详情'})[same ? 0 : 1])
+    await screen.findByText('流程实例标识：' + selected.instanceId)
+    expect(signal?.aborted).toBe(true)
+    await act(async () => { complete(outcomePage(receipt.instanceId, [outcome('oldOutcome')])) })
+    expect(screen.queryByText('oldOutcome')).not.toBeInTheDocument()
+    fireEvent.click(await findOutcomeButton())
+    await screen.findByText('dispatchAgent')
+    expect(processAgentOutcomesApi.list).toHaveBeenNthCalledWith(2, '20', selected.instanceId, undefined, expect.any(AbortSignal))
+  })
+
+  it.each(['edit', 'epoch', 'sign-out'] as const)('cancels outcome requests and drops late values after %s', async change => {
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValueOnce(snapshot())
+    let complete!: (value: ProcessAgentOutcomePage) => void
+    vi.mocked(processAgentOutcomesApi.list).mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    const tree = render(<ExecutionTimelinePage />)
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+    fireEvent.click(await findOutcomeButton())
+    await screen.findByText(OUTCOME_LOADING)
+    const signal = vi.mocked(processAgentOutcomesApi.list).mock.calls[0][3]
+    if (change === 'edit') edit('关联标识', 'trace:next')
+    else {
+      current = change === 'epoch' ? auth('20', true, 91) : {...auth(), status: 'signed-out', authorization: undefined}
+      tree.rerender(<ExecutionTimelinePage />)
+    }
+    expect(signal?.aborted).toBe(true)
+    await act(async () => { complete(outcomePage()) })
+    expect(screen.queryByText('dispatchAgent')).not.toBeInTheDocument()
+    expect(screen.queryByText(OUTCOME_SOURCE)).not.toBeInTheDocument()
+    expect(processAgentOutcomesApi.list).toHaveBeenCalledTimes(1)
   })
 
   it('reads a detail only for the selected current receipt and labels its separate source', async () => {

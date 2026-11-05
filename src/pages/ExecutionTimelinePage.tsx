@@ -3,6 +3,7 @@ import {Alert, Button, Card, Form, Input, Space, Table, Typography, type TableCo
 import {useLayoutEffect, useRef, useState} from 'react'
 import {Link} from 'react-router-dom'
 import {agentApi, type AgentRun, type AgentRunPage} from '../api/agent'
+import {processAgentOutcomesApi, type ProcessAgentOutcome, type ProcessAgentOutcomePage} from '../api/processAgentOutcomes'
 import {isProcessCorrelationId, isProcessCorrelationQuery, isProcessCorrelationUtc, processCorrelationsApi,
   type ProcessCorrelationPage, type ProcessCorrelationQuery, type ProcessCorrelationReceipt,
   type ProcessInstanceSnapshot} from '../api/processCorrelations'
@@ -21,12 +22,17 @@ type ListState = {phase: 'idle' | 'loading'}
   | {phase: 'page'; query: ProcessCorrelationQuery; page: ProcessCorrelationPage}
   | {phase: 'error'; message: string}
 type DetailState = {phase: 'idle' | 'loading'}
-  | {phase: 'snapshot'; snapshot: ProcessInstanceSnapshot}
+  | {phase: 'snapshot'; snapshot: ProcessInstanceSnapshot; selection: number}
   | {phase: 'error'; message: string}
 type PendingRead = {kind: 'list' | 'detail'; controller: AbortController}
 type AgentListState = {phase: 'idle' | 'loading'}
   | {phase: 'page'; page: AgentRunPage}
   | {phase: 'error'; message: string}
+type ProcessAgentOutcomeState = {phase: 'idle' | 'loading'}
+  | {phase: 'page'; page: ProcessAgentOutcomePage}
+  | {phase: 'error'; message: string}
+type ProcessAgentOutcomeRow = ProcessAgentOutcome & {rowIndex: number}
+
 
 
 function UtcTime({value}: {value: string}) {
@@ -88,6 +94,7 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
     read.current = {kind, controller}
     return {
       signal: controller.signal,
+      generation: request,
       isCurrent: () => !controller.signal.aborted && sequence.current === request && currentAllows.current(PAGE),
       finish: () => { if (read.current?.controller === controller) read.current = null },
     }
@@ -143,7 +150,7 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
     setDetail({phase: 'loading'})
     try {
       const snapshot = await processCorrelationsApi.detail(tenant, list.query.correlationId, receipt, request.signal)
-      if (request.isCurrent()) setDetail({phase: 'snapshot', snapshot})
+      if (request.isCurrent()) setDetail({phase: 'snapshot', snapshot, selection: request.generation})
     } catch (failure) {
       if (!request.isCurrent()) return
       if (authFailed(failure)) {
@@ -224,6 +231,9 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
           ? '未记录' : <UtcTime value={detail.snapshot.finishedAt} />}</Typography.Text>
       </Space>
     </Card>}
+    {detail.phase === 'snapshot' && <ProcessAgentOutcomeLookup key={detail.selection}
+      tenant={tenant} instanceId={detail.snapshot.instanceId}
+      isSelectionCurrent={() => sequence.current === detail.selection && currentAllows.current(PAGE)} />}
     {agentWindow && allows(AGENT_PAGE) && <OwnerAgentCorrelationLookup tenant={tenant} query={agentWindow} />}
   </section>
 }
@@ -275,6 +285,69 @@ function OwnerAgentCorrelationLookup({tenant, query}: {tenant: string; query: Lo
       {state.phase === 'page' && <Table<AgentRun> rowKey="runId" dataSource={state.page.items}
         columns={columns} pagination={false} scroll={{x: 620}} locale={{emptyText: '当前时间窗无同关联标识的 Agent 运行'}} />}
       {nextCursor !== null && <Button onClick={() => void load(nextCursor)}>下一页 Agent 运行</Button>}
+    </Space>
+  </Card>
+}
+
+
+function ProcessAgentOutcomeLookup({tenant, instanceId, isSelectionCurrent}: {
+  tenant: string; instanceId: string; isSelectionCurrent: () => boolean
+}) {
+  const [state, setState] = useState<ProcessAgentOutcomeState>({phase: 'idle'})
+  const pending = useRef<AbortController | null>(null)
+
+  useLayoutEffect(() => () => {
+    pending.current?.abort()
+    pending.current = null
+  }, [])
+
+  const load = async (cursor?: string) => {
+    if (pending.current || !isSelectionCurrent()) return
+    const controller = new AbortController()
+    pending.current = controller
+    const isCurrent = () => pending.current === controller && !controller.signal.aborted && isSelectionCurrent()
+    setState({phase: 'loading'})
+    try {
+      const page = await processAgentOutcomesApi.list(tenant, instanceId, cursor, controller.signal)
+      if (isCurrent()) setState({phase: 'page', page})
+    } catch (failure) {
+      if (!isCurrent()) return
+      let message = '暂时无法读取此流程的 Agent 结果。'
+      if (authFailed(failure)) message = '当前身份无法读取流程侧 Agent 结果。'
+      else if (failure instanceof ApiError && failure.status === 404) message = '当前无法读取此流程的 Agent 结果。'
+      else if (cursor !== undefined && failure instanceof ApiError && failure.status === 400) {
+        message = '流程侧 Agent 结果分页已失效，请重新查询。'
+      }
+      setState({phase: 'error', message})
+    } finally {
+      if (pending.current === controller) pending.current = null
+    }
+  }
+
+  const columns: TableColumnsType<ProcessAgentOutcomeRow> = [
+    {title: '活动标识', dataIndex: 'activityId'},
+    {title: '调度状态', dataIndex: 'dispatchState'},
+    {title: '收件处理状态', dataIndex: 'inboxState'},
+    {title: '已记录的 Agent 终态', dataIndex: 'terminalStatus', render: (_, row) => row.terminalStatus ?? '未记录'},
+    {title: '调度记录时间', key: 'dispatchRecordedAt', render: (_, row) => <UtcTime value={row.dispatchRecordedAt} />},
+    {title: '收件时间', key: 'receivedAt', render: (_, row) => row.receivedAt === null ? '未记录' : <UtcTime value={row.receivedAt} />},
+    {title: '决定时间', key: 'decidedAt', render: (_, row) => row.decidedAt === null ? '未记录' : <UtcTime value={row.decidedAt} />},
+  ]
+  const nextCursor = state.phase === 'page' ? state.page.nextCursor : null
+
+  return <Card variant="borderless" className="surface-card" title="流程侧 Agent 结果">
+    <Space orientation="vertical" className="full-width">
+      <Typography.Text type="secondary">来源：Process 本地调度与结果收件记录</Typography.Text>
+      <Typography.Text type="secondary">收件处理状态与已记录的 Agent 终态分别显示。</Typography.Text>
+      <Button disabled={state.phase === 'loading'} onClick={() => void load()}>查询流程侧 Agent 结果</Button>
+      {state.phase === 'loading' && <div role="status">正在查询流程侧 Agent 结果</div>}
+      {state.phase === 'error' && <Alert type="warning" showIcon title={state.message} />}
+      {state.phase === 'page' && <>
+        <Typography.Text>结果观察时间：<UtcTime value={state.page.observedAt} /></Typography.Text>
+        <Table<ProcessAgentOutcomeRow> rowKey="rowIndex" dataSource={state.page.items.map((row, rowIndex) => ({...row, rowIndex}))}
+          columns={columns} pagination={false} scroll={{x: 1180}} locale={{emptyText: '此流程暂无本地 Agent 结果记录'}} />
+      </>}
+      {nextCursor !== null && <Button onClick={() => void load(nextCursor)}>下一页流程侧 Agent 结果</Button>}
     </Space>
   </Card>
 }
