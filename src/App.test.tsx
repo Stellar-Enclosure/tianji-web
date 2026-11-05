@@ -23,6 +23,7 @@ vi.mock('./pages/MemoryCandidatesPage', () => ({default: () => <h1>候选记忆<
 vi.mock('./pages/TaskInboxPage', () => ({default: () => <h1>任务箱</h1>}))
 vi.mock('./pages/TaskDetailPage', () => ({default: () => <h1>任务详情</h1>}))
 vi.mock('./pages/CaseDetailPage', () => ({default: () => <h1>案件查询</h1>}))
+vi.mock('./pages/WorkerFailuresPage', () => ({default: () => <h1>Worker 失败观察</h1>}))
 
 const auth = (codes: string[]) => {
   const current = authorization('20', codes)
@@ -168,5 +169,60 @@ describe('Console routes and owned task resources', () => {
       const label = messages.find(message => message.pageCode === resource?.i18n.pageCode && message.key === resource?.i18n.labelKey)
       expect(label).toEqual(expect.objectContaining({defaultLocale: 'zh-CN', defaults: {'zh-CN': expect.any(String), 'en-US': expect.any(String)}}))
     }
+  })
+})
+
+describe('Worker failure observations route', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    gatewayAuth.context.invalidate()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('opens Worker failure observations only in the existing dual-permission console', async () => {
+    open('/operations/worker-failures', ['TIANJI_TASK_READ', 'TIANJI_PROCESS_READ', 'TIANJI_PROCESS_WORKER_RECOVER'])
+    expect(await screen.findByRole('heading', {name: 'Worker 失败观察'})).toBeInTheDocument()
+    expect(screen.getByRole('link', {name: 'Worker 失败观察'})).toHaveAttribute('href', '/operations/worker-failures')
+  })
+
+  it.each([
+    {codes: []},
+    {codes: ['TIANJI_PROCESS_READ']},
+    {codes: ['TIANJI_PROCESS_WORKER_RECOVER']},
+  ])(
+    'guards the direct Worker route and menu when the existing console user has only $codes', async ({codes}) => {
+      open('/operations/worker-failures', ['TIANJI_TASK_READ', ...codes])
+      expect(await screen.findByText('当前身份不能访问此页面。')).toBeInTheDocument()
+      expect(screen.queryByRole('heading', {name: 'Worker 失败观察'})).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', {name: 'Worker 失败观察'})).not.toBeInTheDocument()
+    })
+
+  it('keeps the existing app permission and default landing', async () => {
+    const pair = ['TIANJI_PROCESS_READ', 'TIANJI_PROCESS_WORKER_RECOVER']
+    const current = authorization('20', pair)
+    expect(resourceRegistry.canAccessResource('tianji.app.console', current.snapshot, current.binding)).toBe(false)
+    open('/', ['TIANJI_TASK_READ', ...pair])
+    expect(await screen.findByRole('heading', {name: '任务箱'})).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/tasks')
+    expect(screen.getByRole('link', {name: 'Worker 失败观察'})).toHaveAttribute('href', '/operations/worker-failures')
+  })
+
+  it('declares only the Worker observation page, menu, labels and existing GET reference', () => {
+    const route = '/operations/worker-failures'
+    const requirement = {mode: 'ALL', codes: ['TIANJI_PROCESS_READ', 'TIANJI_PROCESS_WORKER_RECOVER']}
+    const labels = {defaultLocale: 'zh-CN', defaults: {'zh-CN': 'Worker 失败观察', 'en-US': 'Worker failure observations'}}
+    expect(resources.filter(resource => resource.key.endsWith('workerFailures'))).toEqual([
+      {key: 'tianji.page.workerFailures', type: 'PAGE', target: {route}, requirement,
+        i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.workerFailures'}},
+      {key: 'tianji.menu.workerFailures', type: 'MENU', target: {route, parentKey: 'tianji.app.console'}, requirement,
+        i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.workerFailures'}},
+    ])
+    expect(messages.filter(message => message.key.endsWith('workerFailures'))).toEqual([
+      {pageCode: 'tianji.web.permissions', key: 'page.workerFailures', ...labels},
+      {pageCode: 'tianji.web.permissions', key: 'menu.workerFailures', ...labels},
+    ])
+    expect(references.filter(reference => reference.key.startsWith('tianji.api.process.instance.worker-'))).toEqual([
+      {key: 'tianji.api.process.instance.worker-failures', usage: 'CALLS'},
+    ])
   })
 })

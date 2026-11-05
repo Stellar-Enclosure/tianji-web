@@ -26,4 +26,8 @@ export const messages = defineMessages([
   {pageCode: 'tianji.web.permissions', key: 'page.caseDetail', defaultLocale: 'zh-CN', defaults: {'zh-CN': '案件详情', 'en-US': 'Case details'}},
   {pageCode: 'tianji.web.permissions', key: 'menu.cases', defaultLocale: 'zh-CN', defaults: {'zh-CN': '案件查询', 'en-US': 'Case lookup'}},
   {pageCode: 'tianji.web.permissions', key: 'button.caseActPlanItem', defaultLocale: 'zh-CN', defaults: {'zh-CN': '操作计划项', 'en-US': 'Act on a plan item'}},
+  {pageCode: 'tianji.web.permissions', key: 'page.workerFailures', defaultLocale: 'zh-CN',
+    defaults: {'zh-CN': 'Worker 失败观察', 'en-US': 'Worker failure observations'}},
+  {pageCode: 'tianji.web.permissions', key: 'menu.workerFailures', defaultLocale: 'zh-CN',
+    defaults: {'zh-CN': 'Worker 失败观察', 'en-US': 'Worker failure observations'}},
 ] as const)

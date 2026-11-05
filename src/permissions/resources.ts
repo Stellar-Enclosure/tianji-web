@@ -1,6 +1,6 @@
 import {defineResources} from '@stellar-enclosure/stellar-enclosure-web-shared/permissions'
 import {CANCEL, READ, START, MEMORY_READ, MEMORY_WRITE, MEMORY_FORGET, TASK_READ, TASK_CLAIM, TASK_COMPLETE, TASK_TRANSFER,
-  CASE_READ, CASE_PLAN_ITEM_ACT} from './permissions'
+  CASE_READ, CASE_PLAN_ITEM_ACT, PROCESS_READ, PROCESS_WORKER_RECOVER} from './permissions'
 
 export const resources = defineResources([
   {key: 'tianji.app.console', type: 'APP', target: {applicationCode: 'tianji'},
@@ -53,4 +53,8 @@ export const resources = defineResources([
     requirement: {mode: 'ALL', codes: [CASE_READ]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.cases'}},
   {key: 'tianji.button.caseDetail.actPlanItem', type: 'BUTTON', target: {component: 'src/pages/CaseDetailPage.tsx', action: 'actPlanItem'},
     requirement: {mode: 'ALL', codes: [CASE_READ, CASE_PLAN_ITEM_ACT]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'button.caseActPlanItem'}},
+  {key: 'tianji.page.workerFailures', type: 'PAGE', target: {route: '/operations/worker-failures'},
+    requirement: {mode: 'ALL', codes: [PROCESS_READ, PROCESS_WORKER_RECOVER]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'page.workerFailures'}},
+  {key: 'tianji.menu.workerFailures', type: 'MENU', target: {route: '/operations/worker-failures', parentKey: 'tianji.app.console'},
+    requirement: {mode: 'ALL', codes: [PROCESS_READ, PROCESS_WORKER_RECOVER]}, i18n: {pageCode: 'tianji.web.permissions', labelKey: 'menu.workerFailures'}},
 ] as const)
