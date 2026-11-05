@@ -4,6 +4,7 @@ import {useCallback, useEffect, useRef, useState} from 'react'
 import {Link, useParams} from 'react-router-dom'
 import {agentApi, isRunId, isTerminal, type AgentEvent, type AgentResult, type AgentRun, type CancelCommand} from '../api/agent'
 import {AgentStreamError, observeAgentRun} from '../api/agentEvents'
+import {agentRecoveryApi, type RecoveryDisposition} from '../api/agentRecovery'
 import {isProcessCorrelationUtc} from '../api/processCorrelations'
 import {useAuth} from '../auth/AuthContext'
 import {StatusTag} from './AgentRunsPage'
@@ -208,6 +209,7 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
         {run.waitReason && <Alert type="warning" showIcon message={`等待或核对原因：${run.waitReason}`} />}
         {run.cancelRequested && !isTerminal(run.status) && <Alert type="info" showIcon message="取消请求已记录，正在等待执行停止。" />}
       </Card>
+      {allows('tianji.page.runDetail') && <RecoveryEvidenceCard key={reload} runId={runId} tenant={tenant} />}
       <div className="detail-grid">
         <Card title="执行输出" variant="borderless" className="surface-card">
           {result?.sideEffectOutcome === 'UNKNOWN' && <Alert type="warning" showIcon message="外部操作结果待核对，请勿直接重复执行。" className="form-alert" />}
@@ -294,6 +296,76 @@ function toolEvidence(event: AgentEvent): VisibleToolEvent | null {
     if (state === 'REQUESTED' || accounting === null || (!hasEpoch && !terminal)) return null
   }
   return {toolKey: toolRef.key, version: toolRef.version, state, accounting}
+}
+
+const recoveryLifecycleLabels: Record<RecoveryDisposition['lifecycle'], string> = {
+  QUEUED: '排队中', ACTIVE: '执行中', STALLED: '需要核对', TERMINAL: '已记录终态', UNVERIFIED: '未核验',
+}
+const recoveryReasonLabels: Record<RecoveryDisposition['reason'], string> = {
+  QUEUE_DISCOVERY: '等待调度发现', CURRENT_LEASE: '当前租约有效', CANCEL_REQUESTED: '已记录取消请求',
+  DEADLINE_DUE: '运行截止时间已到', LEASE_MISSING: '未找到当前租约', LEASE_EXPIRED: '运行租约已过期',
+  AUTHORIZATION_DENIED: '运行授权被拒绝', AUTHORIZATION_UNAVAILABLE: '运行授权不可用',
+  FENCE_UNVERIFIED: '执行边界未核验', SUSPENSION_UNVERIFIED: '暂停原因未核验',
+  LEGACY_WAIT_UNVERIFIED: '既有等待状态未核验', TERMINAL_RECORDED: '已记录终态',
+  SOURCE_UNAVAILABLE: '恢复证据源不可用',
+}
+const recoveryEffectLabels: Record<RecoveryDisposition['agentEffect'], string> = {
+  RECORDED_NONE: '运行账本记录为无', RECORDED_CONFIRMED: '运行账本记录为已确认',
+  UNKNOWN: '结果未知，需核对', UNVERIFIED: '未核验',
+}
+const recoveryCoverageLabels: Record<RecoveryDisposition['toolEvidence']['coverage'], string> = {
+  COMPLETE: '本地工具证据已读完', TRUNCATED: '本地工具证据已截断', UNAVAILABLE: '本地工具证据不可用',
+}
+const evidenceFlag = (value: boolean | null) => value === null ? '未能确认' : value ? '已观察到' : '未观察到'
+
+function RecoveryEvidenceCard({runId, tenant}: {runId: string; tenant: string}) {
+  const pending = useRef<AbortController | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [evidence, setEvidence] = useState<RecoveryDisposition>()
+  const [error, setError] = useState<string>()
+
+  useEffect(() => () => pending.current?.abort(), [])
+
+  const load = async () => {
+    if (pending.current) return
+    const request = new AbortController()
+    pending.current = request
+    setLoading(true)
+    setEvidence(undefined)
+    setError(undefined)
+    try {
+      const result = await agentRecoveryApi.get(tenant, runId, request.signal)
+      if (!request.signal.aborted) setEvidence(result)
+    } catch (failure) {
+      if (request.signal.aborted || isAbort(failure)) return
+      setError(failure instanceof ApiError && failure.status === 404
+        ? '当前无法读取该运行的恢复证据。' : '暂时无法读取恢复证据。')
+    } finally {
+      if (pending.current === request) pending.current = null
+      if (!request.signal.aborted) setLoading(false)
+    }
+  }
+
+  return <Card title="恢复证据" variant="borderless" className="surface-card">
+    <Button onClick={() => void load()} loading={loading} disabled={loading}>读取恢复证据</Button>
+    {error && <Alert type="warning" showIcon message={error} />}
+    {evidence && <>
+      <Typography.Paragraph type="secondary">来源：Agent 运行账本与本地工具证据</Typography.Paragraph>
+      {evidence.evidenceConflict && <Alert type="warning" showIcon
+        message="运行账本与工具证据不一致，需要人工核对。" />}
+      <Descriptions column={{xs: 1, sm: 2, lg: 3}} items={[
+        {key: 'time', label: '观察时间', children: <time dateTime={evidence.observedAt}>{evidence.observedAt} UTC</time>},
+        {key: 'lifecycle', label: '运行状态', children: recoveryLifecycleLabels[evidence.lifecycle]},
+        {key: 'reason', label: '记录原因', children: recoveryReasonLabels[evidence.reason]},
+        {key: 'effect', label: '副作用记录', children: recoveryEffectLabels[evidence.agentEffect]},
+        {key: 'coverage', label: '工具证据覆盖', children: recoveryCoverageLabels[evidence.toolEvidence.coverage]},
+        {key: 'dispatching', label: '工具派发中', children: evidenceFlag(evidence.toolEvidence.hasDispatching)},
+        {key: 'unknown', label: '工具结果未知', children: evidenceFlag(evidence.toolEvidence.hasUnknownResult)},
+        {key: 'unresolved', label: '写入结果待核对', children: evidenceFlag(evidence.toolEvidence.hasUnresolvedWrite)},
+        {key: 'receipt', label: '本地工具回执', children: evidenceFlag(evidence.toolEvidence.hasLocalReceipt)},
+      ]} />
+    </>}
+  </Card>
 }
 
 const visible = (event: AgentEvent): VisibleEvent => {

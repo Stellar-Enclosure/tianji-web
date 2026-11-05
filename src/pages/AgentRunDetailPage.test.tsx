@@ -3,11 +3,13 @@ import {MemoryRouter, Route, Routes} from 'react-router-dom'
 import {beforeEach, describe, expect, it, vi} from 'vitest'
 import {agentApi, type AgentResult, type AgentResultUsage} from '../api/agent'
 import {AgentStreamError, observeAgentRun} from '../api/agentEvents'
+import {agentRecoveryApi, type RecoveryDisposition} from '../api/agentRecovery'
 import {useAuth} from '../auth/AuthContext'
 import {authorization, run} from '../test/fixtures'
 import AgentRunDetailPage from './AgentRunDetailPage'
 
 vi.mock('../auth/AuthContext', () => ({useAuth: vi.fn()}))
+vi.mock('../api/agentRecovery', () => ({agentRecoveryApi: {get: vi.fn()}}))
 vi.mock('../api/agent', async original => {
   const actual = await original<typeof import('../api/agent')>()
   return {...actual, agentApi: {list: vi.fn(), start: vi.fn(), get: vi.fn(), result: vi.fn(), cancel: vi.fn()}}
@@ -49,6 +51,11 @@ const streamEvents = () => {
   }
 }
 
+const recovery: RecoveryDisposition = {runId: 'run-1', observedAt: '2026-11-05T10:20:30Z',
+  lifecycle: 'STALLED', reason: 'LEASE_EXPIRED', agentEffect: 'UNVERIFIED', evidenceConflict: false,
+  toolEvidence: {coverage: 'TRUNCATED', hasDispatching: true, hasUnknownResult: null,
+    hasUnresolvedWrite: true, hasLocalReceipt: null}}
+
 describe('Agent run detail', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -57,6 +64,53 @@ describe('Agent run detail', () => {
     vi.mocked(observeAgentRun).mockImplementation(({signal}) => new Promise(resolve => {
       signal.addEventListener('abort', () => resolve(), {once: true})
     }))
+  })
+
+  it('offers an explicit owned recovery evidence read after the run loads', async () => {
+    vi.mocked(agentRecoveryApi.get).mockResolvedValue(recovery)
+    render(view())
+    expect(await screen.findByText('research')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: '读取恢复证据'})).not.toBeNull()
+    expect(agentRecoveryApi.get).not.toHaveBeenCalled()
+  })
+
+  it('displays evidence reasons and unknown facts only after the explicit click', async () => {
+    vi.mocked(agentRecoveryApi.get).mockResolvedValue(recovery)
+    render(view())
+    const read = await screen.findByRole('button', {name: '读取恢复证据'})
+    fireEvent.click(read)
+    await waitFor(() => expect(agentRecoveryApi.get).toHaveBeenCalledWith('20', 'run-1', expect.any(AbortSignal)))
+    expect(await screen.findByText('运行租约已过期')).toBeInTheDocument()
+    expect(screen.getByText('本地工具证据已截断')).toBeInTheDocument()
+    expect(screen.getAllByText('未能确认')).toHaveLength(2)
+    expect(screen.getByText('2026-11-05T10:20:30Z UTC')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: /续跑|重试工具/})).not.toBeInTheDocument()
+  })
+
+  it('keeps the run details when an evidence query fails', async () => {
+    vi.mocked(agentRecoveryApi.get).mockRejectedValue(new Error('private error'))
+    render(view())
+    fireEvent.click(await screen.findByRole('button', {name: '读取恢复证据'}))
+    expect(await screen.findByText('暂时无法读取恢复证据。')).toBeInTheDocument()
+    expect(screen.getByText('research')).toBeInTheDocument()
+    expect(screen.queryByText('private error')).not.toBeInTheDocument()
+  })
+
+  it('aborts and clears recovery evidence when the identity changes', async () => {
+    let finish: ((value: RecoveryDisposition) => void) | undefined
+    let signal: AbortSignal | undefined
+    vi.mocked(agentRecoveryApi.get).mockImplementation((_tenant, _run, request) => {
+      signal = request
+      return new Promise(resolve => {finish = resolve})
+    })
+    const rendered = render(view())
+    fireEvent.click(await screen.findByRole('button', {name: '读取恢复证据'}))
+    await waitFor(() => expect(signal).toBeDefined())
+    vi.mocked(useAuth).mockReturnValue({...auth(), authorization: authorization('21')})
+    rendered.rerender(view())
+    await waitFor(() => expect(signal?.aborted).toBe(true))
+    await act(async () => {finish?.(recovery)})
+    expect(screen.queryByText('运行租约已过期')).not.toBeInTheDocument()
   })
 
   it('does not show a cancel action without its permission', async () => {
