@@ -10,6 +10,16 @@ The Case page looks up a known Case ID through the existing get API; there is no
 
 Case commands reuse the original request when an outcome is uncertain. Accepted results appear separately as this page's operation receipts, which may be replays and do not represent a complete history or the latest state. Success clears writable facts before a fresh read. A failed read retains only confirmed historical receipts. Identity, Case ID, route/resource or read-permission changes discard old page state. Losing the action permission disables confirmation and retry while previously submitted commands retain their service-side state. Case read-only identities can enter their own route with Case permissions. Native Case-to-BPMN and S08/S09 acceptance require the server Case feature, gateway routing, IAM and the applicable permissions.
 
+## Process workspace
+
+A current identity with `TIANJI_PROCESS_RELEASE_PUBLISH` can open `/process-definitions` to list drafts it owns, save edits and reopen a saved draft. Save to update the draft. Validate the exact saved revision before publishing it. Activate the published release separately with `TIANJI_PROCESS_RELEASE_READ` and `TIANJI_PROCESS_RELEASE_ACTIVATE`.
+
+A draft version conflict (`409`) keeps the editor's local buffer until the user confirms a reload. If publication is uncertain, the editor looks up the original command on the saved draft. For uncertain activation, the panel looks up the original command in activation history and shows its receipt separately from the active release. Recovery pointers belong to the current tenant and authenticated identity. The console clears the old pointers when that identity changes.
+
+The technical START action requires `TIANJI_PROCESS_READ` and `TIANJI_PROCESS_START`. Process selects the active release and pins that version to the new instance. When the outcome is uncertain, the console queries the API-025 receipt with the original `commandId` and `requestSha256`.
+
+Each workspace checks its page resource. `TIANJI_PROCESS_DATA_READ` governs access to instance data fields. Historical Case and Agent pages use `TIANJI_CASE_READ` and `TIANJI_AGENT_READ`. Opening `/tasks`, `/tasks/:taskId` or `/memory` directly shows the static handoff before authentication or API calls. See [App.tsx](src/App.tsx), [App.test.tsx](src/App.test.tsx), [AuthContext.test.tsx](src/auth/AuthContext.test.tsx), [ProcessDefinitionWorkspacePage.test.tsx](src/pages/ProcessDefinitionWorkspacePage.test.tsx), [ProcessDraftEditorPage.test.tsx](src/pages/ProcessDraftEditorPage.test.tsx) and [ProcessActivationPanel.test.tsx](src/pages/ProcessActivationPanel.test.tsx).
+
 ## Configuration
 
 Copy `.env.example` to an ignored local environment file and set:
