@@ -9,7 +9,7 @@ function Probe() {
   const auth = useAuth()
   return <div><span data-testid="status">{auth.status}</span>
     <span data-testid="tenant">{auth.authorization?.identity.tenantId ?? ''}</span>
-    <span data-testid="can-start">{String(auth.allows('tianji.button.runs.start'))}</span>
+    <span data-testid="can-cancel-run">{String(auth.allows('tianji.button.runDetail.cancel'))}</span>
     <span data-testid="can-read-release">{String(auth.allows('tianji.page.processReleases'))}</span>
     <span>{auth.error}</span>
     <button onClick={() => void auth.retry()}>重新验证</button>
@@ -60,7 +60,7 @@ describe('authenticated tenant context', () => {
     render(<AuthProvider><Probe /></AuthProvider>)
     expect(await screen.findByText('ready')).toBeInTheDocument()
     expect(screen.getByTestId('tenant')).toHaveTextContent('20')
-    expect(screen.getByTestId('can-start')).toHaveTextContent('true')
+    expect(screen.getByTestId('can-cancel-run')).toHaveTextContent('true')
     act(() => gatewayAuth.context.invalidate())
     expect(screen.getByTestId('status')).toHaveTextContent('signed-out')
     expect(screen.getByTestId('tenant')).toHaveTextContent('')
@@ -71,7 +71,7 @@ describe('authenticated tenant context', () => {
     render(<AuthProvider><Probe /></AuthProvider>)
     expect(await screen.findByText('error')).toBeInTheDocument()
     expect(screen.getByTestId('tenant')).toHaveTextContent('')
-    expect(screen.getByTestId('can-start')).toHaveTextContent('false')
+    expect(screen.getByTestId('can-cancel-run')).toHaveTextContent('false')
   })
 
   it('does not restore an old snapshot after the session changes during bootstrap', async () => {
@@ -90,7 +90,7 @@ describe('authenticated tenant context', () => {
     expect(await screen.findByText('ready')).toBeInTheDocument()
     act(() => notifyAuthFailure('tenant-changed'))
     expect(screen.getByTestId('status')).toHaveTextContent('forbidden')
-    expect(screen.getByTestId('can-start')).toHaveTextContent('false')
+    expect(screen.getByTestId('can-cancel-run')).toHaveTextContent('false')
   })
 
   it('admits a Process-only snapshot and invalidates its permission with the request epoch', async () => {
@@ -98,7 +98,7 @@ describe('authenticated tenant context', () => {
     render(<AuthProvider><Probe /></AuthProvider>)
     expect(await screen.findByText('ready')).toBeInTheDocument()
     expect(screen.getByTestId('can-read-release')).toHaveTextContent('true')
-    expect(screen.getByTestId('can-start')).toHaveTextContent('false')
+    expect(screen.getByTestId('can-cancel-run')).toHaveTextContent('false')
     act(() => gatewayAuth.context.invalidate())
     expect(screen.getByTestId('can-read-release')).toHaveTextContent('false')
   })

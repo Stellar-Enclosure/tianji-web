@@ -8,8 +8,6 @@ import {agentRecoveryApi, type RecoveryDisposition} from '../api/agentRecovery'
 import {isProcessCorrelationUtc} from '../api/processCorrelations'
 import {useAuth} from '../auth/AuthContext'
 import {StatusTag} from './AgentRunsPage'
-import MemoryPreferenceAction from './MemoryPreferenceAction'
-import MemoryPreferenceIntentStatus from './MemoryPreferenceIntentStatus'
 
 type VisibleToolEvent = Readonly<{toolKey: string; version: number; state: ToolEventState;
   accounting: 'PENDING' | 'SETTLED' | null}>
@@ -194,8 +192,6 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
     {notice && <Alert type="warning" showIcon message={notice} />}
     {cancelMessage && <Alert type="info" showIcon message={cancelMessage} />}
     {!run && !displayError && <Spin description="正在读取运行" />}
-    <MemoryPreferenceAction runId={runId} completed={run?.status === 'COMPLETED'} sourceEventId={events.find(event => event.completed && event.sequence === run?.lastEventSequence)?.eventId} />
-    <MemoryPreferenceIntentStatus runId={runId} available={!!run && run.runId === runId} />
     {run && run.runId === runId && <>
       <Card variant="borderless" className="surface-card">
         <Descriptions column={{xs: 1, sm: 2, lg: 3}} items={[

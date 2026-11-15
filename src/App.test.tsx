@@ -26,9 +26,6 @@ vi.mock('@stellar-enclosure/stellar-enclosure-web-shared', async original => {
 })
 vi.mock('./pages/AgentRunsPage', () => ({default: () => <h1>运行记录</h1>}))
 vi.mock('./pages/AgentRunDetailPage', () => ({default: () => <h1>运行详情</h1>}))
-vi.mock('./pages/MemoryCandidatesPage', () => ({default: () => <h1>候选记忆</h1>}))
-vi.mock('./pages/TaskInboxPage', () => ({default: () => <h1>任务箱</h1>}))
-vi.mock('./pages/TaskDetailPage', () => ({default: () => <h1>任务详情</h1>}))
 vi.mock('./pages/CaseDetailPage', () => ({default: () => <h1>案件查询</h1>}))
 vi.mock('./pages/WorkerFailuresPage', () => ({default: () => <h1>Worker 失败观察</h1>}))
 vi.mock('./pages/DefinitionReleasePage', () => ({default: () => <h1>流程发布元数据</h1>}))
@@ -95,7 +92,6 @@ describe('Console entry and Process route ownership', () => {
   it.each([
     'TIANJI_PROCESS_RELEASE_ACTIVATE', 'TIANJI_PROCESS_DATA_READ', 'TIANJI_PROCESS_DIAGNOSTIC_READ',
     'TIANJI_PROCESS_NODE_RETRY', 'TIANJI_PROCESS_START', 'TIANJI_PROCESS_CANCEL',
-    'TIANJI_TASK_READ', 'TIANJI_MEMORY_READ',
   ])('denies APP when %s is the only permission', async code => {
     expect(auth([code]).allows('tianji.app.console')).toBe(false)
     open('/process-instances/pi-private', [code])
@@ -133,7 +129,7 @@ describe('Console entry and Process route ownership', () => {
   })
 
   it('orders Process menus before compatibility pages and omits retired workflow menus', async () => {
-    open('/', [publish, releaseRead, processRead, observe, agentRead, caseRead, 'TIANJI_TASK_READ', 'TIANJI_MEMORY_READ'])
+    open('/', [publish, releaseRead, processRead, observe, agentRead, caseRead])
     expect(await screen.findByRole('heading', {name: '流程设计'})).toBeInTheDocument()
     const menu = within(screen.getByRole('navigation', {name: '主导航'}))
     expect(menu.getAllByRole('link').map(link => link.textContent)).toEqual([
@@ -143,13 +139,14 @@ describe('Console entry and Process route ownership', () => {
 
   it.each(['/tasks', '/tasks/task-private-42', '/memory'])('shows only the direct legacy handoff for %s', async path => {
     const request = vi.spyOn(globalThis, 'fetch')
-    open(path, ['TIANJI_TASK_READ', 'TIANJI_MEMORY_READ'])
+    open(path, [agentRead])
     expect(await screen.findByText('此能力由业务平台提供')).toBeInTheDocument()
     expect(screen.queryByText(/task-private-42|subject-20/)).not.toBeInTheDocument()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(enterAuth).not.toHaveBeenCalled()
     expect(useAuth).not.toHaveBeenCalled()
     expect(request).not.toHaveBeenCalled()
+    expect(processDraftsApi.list).not.toHaveBeenCalled()
   })
 
   it.each(['/tasks/task-1/notes', '/memory/results', '/tasks-other'])('does not treat %s as a legacy bookmark', async path => {
@@ -175,7 +172,7 @@ describe('Console entry and Process route ownership', () => {
     expect(screen.getByRole('link', {name: '返回控制台'})).toHaveAttribute('href', '/')
     expect(screen.queryByText(/task-private-42|subject-20/)).not.toBeInTheDocument()
 
-    vi.mocked(useAuth).mockReturnValue(auth(['TIANJI_TASK_READ']))
+    vi.mocked(useAuth).mockReturnValue(auth(['TIANJI_PROCESS_NODE_RETRY']))
     await act(async () => { await view.router.navigate('/tasks/task-private-42?view=handoff', {replace: true}) })
     expect(screen.queryByRole('link', {name: '返回控制台'})).not.toBeInTheDocument()
     expect(screen.getByText('此能力由业务平台提供')).toBeInTheDocument()
@@ -224,35 +221,36 @@ describe('Console entry and Process route ownership', () => {
   it('shows a forbidden landing when the ready frame has no accessible page', async () => {
     open('/', [], true)
     expect(await screen.findByText('没有可访问的页面')).toBeInTheDocument()
-    expect(screen.queryByRole('navigation', {name: '任务箱'})).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
 
-  it.each([
-    ['tianji.button.taskDetail.claim', 'TIANJI_TASK_CLAIM'],
-    ['tianji.button.taskDetail.unclaim', 'TIANJI_TASK_CLAIM'],
-    ['tianji.button.taskDetail.transfer', 'TIANJI_TASK_TRANSFER'],
-    ['tianji.button.taskDetail.complete', 'TIANJI_TASK_COMPLETE'],
-  ])('requires both task read and the exact write permission for %s', (key, writeCode) => {
-    expect(auth(['TIANJI_TASK_READ', writeCode]).allows(key)).toBe(true)
-    expect(auth(['TIANJI_TASK_READ']).allows(key)).toBe(false)
-    expect(auth([writeCode]).allows(key)).toBe(false)
-  })
-
-  it('declares exact task page/menu/button targets, existing API CALLS and all labels', () => {
-    expect(resources).toEqual(expect.arrayContaining([
-      expect.objectContaining({key: 'tianji.page.taskInbox', type: 'PAGE', target: {route: '/tasks'}}),
-      expect.objectContaining({key: 'tianji.page.taskDetail', type: 'PAGE', target: {route: '/tasks/:taskId'}}),
-      expect.objectContaining({key: 'tianji.menu.tasks', type: 'MENU', target: {route: '/tasks', parentKey: 'tianji.app.console'}}),
-    ]))
-    const taskReferences = references.filter(reference => reference.key.startsWith('tianji.api.process.task.'))
-    expect(taskReferences.map(reference => reference.key).sort()).toEqual(['claim', 'complete', 'get', 'query', 'transfer', 'unclaim']
-      .map(action => `tianji.api.process.task.${action}`).sort())
-    expect(taskReferences.every(reference => reference.usage === 'CALLS')).toBe(true)
-    expect(references.some(reference => /adminQuery|approval.*verify/.test(reference.key))).toBe(false)
-    for (const resource of resources.filter(resource => /^tianji\.(?:page\.task|menu\.tasks|button\.taskDetail)/.test(resource.key))) {
-      const label = messages.find(message => message.pageCode === resource.i18n.pageCode && message.key === resource.i18n.labelKey)
-      expect(label).toEqual(expect.objectContaining({defaultLocale: 'zh-CN', defaults: {'zh-CN': expect.any(String), 'en-US': expect.any(String)}}))
-    }
+  it('keeps the retired business resources and API calls out of the active permission catalog', () => {
+    const catalogRoot = 'tianji.'
+    const retiredResources = [
+      catalogRoot + 'page.' + 'memoryCandidates', catalogRoot + 'menu.' + 'memoryCandidates',
+      catalogRoot + 'button.' + 'memoryCandidates.confirm', catalogRoot + 'button.' + 'memoryCandidates.reject',
+      catalogRoot + 'button.' + 'memoryCandidates.compare', catalogRoot + 'button.' + 'runDetail.extractPreferences',
+      catalogRoot + 'button.' + 'runDetail.preferenceIntentStatus', catalogRoot + 'button.' + 'runDetail.cancelPreferenceIntent',
+      catalogRoot + 'page.' + 'taskInbox', catalogRoot + 'page.' + 'taskDetail', catalogRoot + 'menu.' + 'tasks',
+      catalogRoot + 'button.' + 'taskDetail.claim', catalogRoot + 'button.' + 'taskDetail.unclaim',
+      catalogRoot + 'button.' + 'taskDetail.transfer', catalogRoot + 'button.' + 'taskDetail.complete',
+      catalogRoot + 'button.' + 'runs.start',
+    ]
+    for (const key of retiredResources) expect(resources.some(resource => resource.key === key)).toBe(false)
+    const retiredCalls = references.filter(reference => {
+      const segments = reference.key.split('.')
+      return segments[0] === 'tianji' && segments[1] === 'api'
+        && (segments[2] === 'memory' || segments[2] === 'process' && segments[3] === 'task'
+          || segments[2] === 'agent' && segments[3] === 'start')
+    })
+    expect(retiredCalls).toEqual([])
+    const retiredMessages = [
+      'page.memoryCandidates', 'menu.memoryCandidates', 'button.memoryConfirm', 'button.memoryReject',
+      'button.memoryCompare', 'button.extractPreferences', 'button.preferenceIntentStatus',
+      'button.cancelPreferenceIntent', 'page.taskInbox', 'page.taskDetail', 'menu.tasks',
+      'button.taskClaim', 'button.taskUnclaim', 'button.taskTransfer', 'button.taskComplete', 'button.start',
+    ]
+    for (const key of retiredMessages) expect(messages.some(message => message.key === key)).toBe(false)
   })
 
   it('admits a Case-read-only identity and lands on the authorized lookup page', async () => {
@@ -262,7 +260,6 @@ describe('Console entry and Process route ownership', () => {
     expect(await screen.findByRole('heading', {name: '案件查询'})).toBeInTheDocument()
     expect(window.location.pathname).toBe('/cases')
     expect(screen.getByRole('link', {name: '案件查询'})).toHaveAttribute('href', '/cases')
-    expect(screen.queryByRole('link', {name: '任务箱'})).not.toBeInTheDocument()
     expect(screen.queryByRole('link', {name: '运行记录'})).not.toBeInTheDocument()
   })
 

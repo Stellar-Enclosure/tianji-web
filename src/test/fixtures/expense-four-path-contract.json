@@ -41,31 +41,6 @@
       "reviewLane": "standard"
     }
   },
-  "humanTask": {
-    "taskId": "expense-review-task-fixture",
-    "scopeType": "PROCESS",
-    "scopeId": "expense-process-fixture",
-    "releaseVersion": "expense-v1",
-    "definitionKey": "expenseReview",
-    "taskDefinitionKey": "reviewExpense",
-    "name": "Review expense",
-    "kind": "ACTION",
-    "approvalField": null,
-    "version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "lane": "exception",
-    "availableLanes": [
-      "exception",
-      "standard"
-    ],
-    "assigned": false,
-    "assignedToMe": false,
-    "suspended": false,
-    "formSchema": {
-      "finding": "STRING"
-    },
-    "createdAt": "2026-11-05T00:00:00.123456Z",
-    "dueAt": null
-  },
   "caseInstance": {
     "caseInstanceId": "expense-case-fixture",
     "definitionKey": "expenseException",

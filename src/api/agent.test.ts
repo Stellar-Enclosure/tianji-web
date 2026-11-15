@@ -1,15 +1,13 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 import {gatewayAuth} from '../auth/gatewayAuth'
 import {run} from '../test/fixtures'
-import {agentApi, type StartCommand} from './agent'
+import {agentApi, type CancelCommand} from './agent'
 import {setAuthFailureHandler} from './client'
 import type {ProcessCorrelationQuery} from './processCorrelations'
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value),
   {status, headers: {'Content-Type': 'application/json'}})
-const command: StartCommand = {definitionKey: 'research', definitionVersion: 1, idempotencyKey: 'request-1',
-  input: {text: 'question', artifactRefs: [], taskData: {}}, sessionId: null, businessKey: null,
-  correlationId: null, policyOverride: null}
+const command: CancelCommand = {runId: 'run-1', commandId: 'cancel-1', expectedRevision: 2, reason: 'USER'}
 
 const correlation: ProcessCorrelationQuery = {
   correlationId: 'Expense:1', fromInclusive: '2026-11-05T10:00:00.000001Z', toExclusive: '2026-11-05T10:20:00.000002Z',
@@ -25,12 +23,15 @@ describe('Agent JSON client', () => {
   })
   afterEach(() => { gatewayAuth.context.invalidate(); setAuthFailureHandler(() => {}); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-  it('sends one cookie and CSRF protected mutation without an Authorization header', async () => {
-    const fetcher = vi.fn().mockResolvedValue(json(run()))
+  it('sends an authorized cancellation with the current tenant and CSRF header', async () => {
+    const result = {runId: 'run-1', accepted: true, status: 'CANCELLED', revision: 3}
+    const fetcher = vi.fn().mockResolvedValue(json(result))
     vi.stubGlobal('fetch', fetcher)
-    await expect(agentApi.start('20', command)).resolves.toEqual(run())
+    await expect(agentApi.cancel('20', command)).resolves.toEqual(result)
     expect(fetcher).toHaveBeenCalledTimes(1)
-    const request = fetcher.mock.calls[0][1] as RequestInit
+    const [url, request] = fetcher.mock.calls[0] as [string, RequestInit]
+    expect(new URL(url, 'https://example.test').pathname).toMatch(/\/agent-runs\/run-1\/cancel$/)
+    expect(request.method).toBe('POST')
     expect(request.credentials).toBe('include')
     expect(new Headers(request.headers).get('Authorization')).toBeNull()
     expect(new Headers(request.headers).get('X-CSRF-TOKEN')).toBe('test-csrf')
@@ -38,10 +39,10 @@ describe('Agent JSON client', () => {
     expect(JSON.parse(String(request.body))).toEqual(command)
   })
 
-  it('does not replay a failed mutation', async () => {
+  it('does not replay a failed cancellation mutation', async () => {
     const fetcher = vi.fn().mockResolvedValue(json({code: 'TIANJI_DEPENDENCY_UNAVAILABLE'}, 503))
     vi.stubGlobal('fetch', fetcher)
-    await expect(agentApi.start('20', command)).rejects.toMatchObject({status: 503})
+    await expect(agentApi.cancel('20', command)).rejects.toMatchObject({status: 503})
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 

@@ -5,17 +5,16 @@ import {fileURLToPath} from 'node:url'
 import {afterEach, expect, it, vi} from 'vitest'
 import {casesApi} from '../api/cases'
 import {setAuthFailureHandler} from '../api/client'
-import {humanTasksApi} from '../api/humanTasks'
 import {gatewayAuth} from '../auth/gatewayAuth'
 
 const fixturePath = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/expense-four-path-contract.json')
-const fixtureSha256 = 'e40621b736dcaf1685c4335acba70f000c9a9c01e443f743edc25640ce2b7cb7'
+const fixtureSha256 = '7d4d7af3c05a0888b77800a8b58af990cc08a2ff5daf9e8bb3b4b9374ceb43bc'
 const json = (value: unknown) => new Response(JSON.stringify(value), {headers: {'Content-Type': 'application/json'}})
 
 const readFixture = (): Buffer => {
   expect(existsSync(fixturePath), 'committed canonical expense fixture').toBe(true)
   const bytes = readFileSync(fixturePath)
-  expect(bytes.byteLength).toBe(3084)
+  expect(bytes.byteLength).toBe(2384)
   expect(createHash('sha256').update(bytes).digest('hex')).toBe(fixtureSha256)
   return bytes
 }
@@ -31,13 +30,13 @@ it('contains the canonical expense contract fixture', () => {
   readFixture()
 })
 
-it('decodes the expense ACTION task and formal Case using current clients', async () => {
+it('keeps the expense fixture as a formal Case projection only', async () => {
   const fixture: unknown = JSON.parse(readFixture().toString('utf8'))
-  if (fixture === null || typeof fixture !== 'object' || !('humanTask' in fixture) || !('caseInstance' in fixture)) {
-    throw new Error('Canonical expense fixture projections are missing')
+  if (fixture === null || typeof fixture !== 'object' || !('caseInstance' in fixture)) {
+    throw new Error('Canonical Case fixture projection is missing')
   }
   expect(Object.keys(fixture).sort()).toEqual([
-    'caseInstance', 'humanTask', 'models', 'paths', 'releaseVersion', 'schemaVersion', 'startInputs',
+    'caseInstance', 'models', 'paths', 'releaseVersion', 'schemaVersion', 'startInputs',
   ])
   expect(fixture).toMatchObject({schemaVersion: 1, releaseVersion: 'expense-v1'})
 
@@ -45,21 +44,11 @@ it('decodes the expense ACTION task and formal Case using current clients', asyn
   vi.spyOn(gatewayAuth, 'csrf').mockResolvedValue({
     headerName: 'X-CSRF-TOKEN', token: 'test-csrf', expiresAt: new Date(Date.now() + 60_000).toISOString(),
   })
-  const fetcher = vi.fn<typeof fetch>()
-    .mockResolvedValueOnce(json(fixture.humanTask))
-    .mockResolvedValueOnce(json(fixture.caseInstance))
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json(fixture.caseInstance))
   vi.stubGlobal('fetch', fetcher)
 
-  const taskId = 'expense-review-task-fixture'
   const caseInstanceId = 'expense-case-fixture'
-  const task = await humanTasksApi.get('20', {taskId})
   const formalCase = await casesApi.get('20', {caseInstanceId})
-  expect(task).toEqual(fixture.humanTask)
-  expect(task).toMatchObject({
-    scopeType: 'PROCESS', releaseVersion: 'expense-v1', definitionKey: 'expenseReview',
-    taskDefinitionKey: 'reviewExpense', kind: 'ACTION', approvalField: null, lane: 'exception',
-    formSchema: {finding: 'STRING'}, createdAt: '2026-11-05T00:00:00.123456Z', dueAt: null,
-  })
   expect(formalCase).toEqual(fixture.caseInstance)
   expect(formalCase).toMatchObject({
     definitionKey: 'expenseException', releaseVersion: 'expense-v1', status: 'ACTIVE',
@@ -74,11 +63,11 @@ it('decodes the expense ACTION task and formal Case using current clients', asyn
   ])
 
   const baseUrl = gatewayAuth.applicationBaseUrl.replace(/\/$/, '')
-  expect(fetcher).toHaveBeenCalledTimes(2)
+  expect(fetcher).toHaveBeenCalledTimes(1)
   expect(fetcher.mock.calls.map(([url]) => new URL(String(url), 'https://example.test').pathname)).toEqual([
-    '/api/tianji/v1/human-tasks/get', '/api/tianji/v1/cases/get',
-  ].map(route => new URL(baseUrl + route, 'https://example.test').pathname))
-  expect(fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{taskId}, {caseInstanceId}])
+    new URL(baseUrl + '/api/tianji/v1/cases/get', 'https://example.test').pathname,
+  ])
+  expect(fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{caseInstanceId}])
   for (const [, init] of fetcher.mock.calls) {
     const headers = new Headers(init?.headers)
     expect(init?.method).toBe('POST')

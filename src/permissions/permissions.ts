@@ -1,15 +1,7 @@
 import {definePermissionReferences} from '@stellar-enclosure/stellar-enclosure-web-shared/permissions'
 
 export const READ = 'TIANJI_AGENT_READ' as const
-export const START = 'TIANJI_AGENT_START' as const
 export const CANCEL = 'TIANJI_AGENT_CANCEL' as const
-export const MEMORY_READ = 'TIANJI_MEMORY_READ' as const
-export const MEMORY_WRITE = 'TIANJI_MEMORY_WRITE' as const
-export const MEMORY_FORGET = 'TIANJI_MEMORY_FORGET' as const
-export const TASK_READ = 'TIANJI_TASK_READ' as const
-export const TASK_CLAIM = 'TIANJI_TASK_CLAIM' as const
-export const TASK_COMPLETE = 'TIANJI_TASK_COMPLETE' as const
-export const TASK_TRANSFER = 'TIANJI_TASK_TRANSFER' as const
 export const CASE_READ = 'TIANJI_CASE_READ' as const
 export const CASE_PLAN_ITEM_ACT = 'TIANJI_CASE_PLAN_ITEM_ACT' as const
 export const PROCESS_READ = 'TIANJI_PROCESS_READ' as const
@@ -23,7 +15,6 @@ export const PROCESS_DIAGNOSTIC_READ = 'TIANJI_PROCESS_DIAGNOSTIC_READ' as const
 export const PROCESS_NODE_RETRY = 'TIANJI_PROCESS_NODE_RETRY' as const
 export const PROCESS_START = 'TIANJI_PROCESS_START' as const
 export const PROCESS_CANCEL = 'TIANJI_PROCESS_CANCEL' as const
-export const permissions = definePermissionReferences([READ, START, CANCEL, MEMORY_READ, MEMORY_WRITE, MEMORY_FORGET,
-  TASK_READ, TASK_CLAIM, TASK_COMPLETE, TASK_TRANSFER, CASE_READ, CASE_PLAN_ITEM_ACT, PROCESS_READ, PROCESS_WORKER_RECOVER,
+export const permissions = definePermissionReferences([READ, CANCEL, CASE_READ, CASE_PLAN_ITEM_ACT, PROCESS_READ, PROCESS_WORKER_RECOVER,
   PROCESS_RELEASE_READ, PROCESS_RELEASE_PUBLISH, PROCESS_RELEASE_ACTIVATE, PROCESS_OBSERVE, PROCESS_DATA_READ,
   PROCESS_DIAGNOSTIC_READ, PROCESS_NODE_RETRY, PROCESS_START, PROCESS_CANCEL] as const)

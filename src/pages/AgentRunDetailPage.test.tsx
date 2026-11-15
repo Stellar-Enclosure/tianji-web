@@ -12,7 +12,7 @@ vi.mock('../auth/AuthContext', () => ({useAuth: vi.fn()}))
 vi.mock('../api/agentRecovery', () => ({agentRecoveryApi: {get: vi.fn()}}))
 vi.mock('../api/agent', async original => {
   const actual = await original<typeof import('../api/agent')>()
-  return {...actual, agentApi: {list: vi.fn(), start: vi.fn(), get: vi.fn(), result: vi.fn(), cancel: vi.fn()}}
+  return {...actual, agentApi: {list: vi.fn(), get: vi.fn(), result: vi.fn(), cancel: vi.fn()}}
 })
 vi.mock('../api/agentEvents', async original => {
   const actual = await original<typeof import('../api/agentEvents')>()
@@ -301,14 +301,19 @@ describe('Agent run detail', () => {
     expect(agentApi.result).toHaveBeenCalledTimes(1)
   })
 
-  it('enables preference extraction only after the matching actual completed status event arrives', async () => {
+  it('keeps completed run observation without preference-management controls', async () => {
     vi.mocked(agentApi.get).mockResolvedValue({...run('run-1', 'COMPLETED'), finishedAt: '2026-10-31T00:00:00Z'})
     vi.mocked(agentApi.result).mockResolvedValue(terminalResult())
     let receive: Parameters<typeof observeAgentRun>[0]['onEvent'] | undefined
     vi.mocked(observeAgentRun).mockImplementation(options => { receive = options.onEvent; return new Promise(resolve => options.signal.addEventListener('abort', () => resolve(), {once: true})) })
     render(view()); await waitFor(() => expect(receive).toBeDefined())
-    expect(screen.getByRole('button', {name: '提取偏好候选'})).toBeDisabled()
     await act(async () => { receive?.({eventId: 'actual-terminal', runId: 'run-1', sequence: 1, type: 'RUN_STATUS_CHANGED', occurredAt: '2026-10-31T00:00:00Z', author: null, payload: {status: 'COMPLETED'}}) })
-    expect(screen.getByRole('button', {name: '提取偏好候选'})).toBeEnabled()
+    expect(await screen.findByText('final answer')).toBeInTheDocument()
+    expect(screen.getByText('#1 RUN_STATUS_CHANGED')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: '提取偏好候选'})).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: '查询提取状态'})).not.toBeInTheDocument()
+    expect(agentApi.get).toHaveBeenCalledWith('20', 'run-1', expect.any(AbortSignal))
+    expect(agentApi.result).toHaveBeenCalledWith('20', 'run-1', expect.any(AbortSignal))
+    expect(observeAgentRun).toHaveBeenCalledTimes(1)
   })
 })

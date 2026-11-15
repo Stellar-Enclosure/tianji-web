@@ -44,16 +44,6 @@ export type AgentResult = Readonly<{
   sideEffectOutcome: string | null
   usage: AgentResultUsage | null
 }>
-export type StartCommand = Readonly<{
-  definitionKey: string
-  definitionVersion: number
-  idempotencyKey: string
-  input: Readonly<{text: string; artifactRefs: readonly string[]; taskData: Readonly<Record<string, never>>}>
-  sessionId: null
-  businessKey: null
-  correlationId: null
-  policyOverride: null
-}>
 export type CancelCommand = Readonly<{runId: string; commandId: string; expectedRevision: number; reason: string}>
 export type CancelResult = Readonly<{runId: string; accepted: boolean; status: RunStatus; revision: number}>
 
@@ -184,11 +174,6 @@ export const agentApi = {
     if (!isAgentResult(value) || value.runId !== runId) return invalid()
     const {status, output, errorCode, sideEffectOutcome, usage} = value
     return {runId, status, output, errorCode, sideEffectOutcome, usage: resultUsage(usage)}
-  },
-  async start(tenant: string, command: StartCommand, signal?: AbortSignal): Promise<AgentRun> {
-    const value = await requestJson<unknown>(BASE, tenant, {method: 'POST', body: JSON.stringify(command), signal})
-    if (!isAgentRun(value)) return invalid()
-    return value
   },
   async cancel(tenant: string, command: CancelCommand, signal?: AbortSignal): Promise<CancelResult> {
     const value = await requestJson<unknown>(`${pathFor(command.runId)}/cancel`, tenant,

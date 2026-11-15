@@ -24,15 +24,14 @@ beforeEach(() => {
 })
 afterEach(() => { gatewayAuth.context.invalidate(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it('runs the start, persisted event and cancellation flow through the browser transport', async () => {
+it('opens an existing run and observes its persisted events and cancellation', async () => {
   let current: AgentRun = {...run(), status: 'QUEUED', attempt: 0, revision: 0, lastEventSequence: 1}
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined
   const encoder = new TextEncoder()
   const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input), 'https://example.test')
     const method = init?.method ?? 'GET'
-    if (url.pathname.endsWith('/agent-runs') && method === 'GET') return Promise.resolve(json({items: [], nextCursor: null}))
-    if (url.pathname.endsWith('/agent-runs') && method === 'POST') return Promise.resolve(json(current))
+    if (url.pathname.endsWith('/agent-runs') && method === 'GET') return Promise.resolve(json({items: [current], nextCursor: null}))
     if (url.pathname.endsWith('/run-1/events')) {
       return Promise.resolve(new Response(new ReadableStream<Uint8Array>({start(controller) {
         stream = controller
@@ -57,15 +56,16 @@ it('runs the start, persisted event and cancellation flow through the browser tr
   render(<MemoryRouter initialEntries={['/runs']}><Routes>
     <Route path="/runs" element={<AgentRunsPage />} /><Route path="/runs/:runId" element={<AgentRunDetailPage />} />
   </Routes></MemoryRouter>)
-  fireEvent.click(await screen.findByRole('button', {name: '启动运行'}))
-  fireEvent.change(screen.getByLabelText('Agent 定义标识'), {target: {value: 'research'}})
-  fireEvent.change(screen.getByLabelText('任务内容'), {target: {value: 'question'}})
-  fireEvent.click(screen.getByRole('button', {name: /^启\s*动$/}))
+  expect(await screen.findByText('research')).toBeInTheDocument()
+  expect(screen.queryByRole('button', {name: '启动运行'})).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: '查看'}))
   expect(await screen.findByText(/#1 RUN_QUEUED/)).toBeInTheDocument()
   fireEvent.click(await screen.findByRole('button', {name: '取消运行'}))
   await waitFor(() => expect(screen.getByText('已取消')).toBeInTheDocument())
   expect(await screen.findByText(/#2 RUN_STATUS_CHANGED/)).toBeInTheDocument()
   const requests = fetcher.mock.calls.map(([, init]) => init as RequestInit)
+  expect(fetcher.mock.calls.some(([input, init]) => new URL(String(input), 'https://example.test').pathname.endsWith('/agent-runs')
+    && init?.method === 'POST')).toBe(false)
   expect(requests.every(request => request.credentials === 'include')).toBe(true)
   expect(requests.every(request => new Headers(request.headers).get('Authorization') === null)).toBe(true)
   expect(requests.every(request => new Headers(request.headers).get('X-Egon-Tianji-Tenant') === '20')).toBe(true)

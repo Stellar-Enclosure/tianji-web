@@ -9,7 +9,7 @@ export const identity = (tenantId = '20'): GatewayIdentityResult => ({
   authenticationExpiresAt: Math.floor(Date.now() / 1000) + 120,
   securityVersion: {realm: '1', client: '1', subject: '1'}, ssoLogoutUri: `https://idp.example/tenants/${tenantId}/logout`,
 })
-export const snapshot = (tenantId = '20', permissions = ['TIANJI_AGENT_READ', 'TIANJI_AGENT_START', 'TIANJI_AGENT_CANCEL']): PermissionSnapshot => ({
+export const snapshot = (tenantId = '20', permissions = ['TIANJI_AGENT_READ', 'TIANJI_AGENT_CANCEL']): PermissionSnapshot => ({
   issuer: `https://idp.example/tenants/${tenantId}`, subject: `subject-${tenantId}`,
   catalogScope: {catalogScopeId: '10', tenantId, businessCode: 'xingyuan', applicationCode: 'tianji', namespaceCode: 'default', environment: 'local'},
   catalogVersion: '1', authVersion: '2', policyVersion: '3',

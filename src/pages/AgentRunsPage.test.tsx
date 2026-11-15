@@ -9,11 +9,11 @@ import AgentRunsPage from './AgentRunsPage'
 vi.mock('../auth/AuthContext', () => ({useAuth: vi.fn()}))
 vi.mock('../api/agent', async original => {
   const actual = await original<typeof import('../api/agent')>()
-  return {...actual, agentApi: {list: vi.fn(), start: vi.fn(), get: vi.fn(), result: vi.fn(), cancel: vi.fn()}}
+  return {...actual, agentApi: {list: vi.fn(), get: vi.fn(), result: vi.fn(), cancel: vi.fn()}}
 })
 
-const auth = (tenant = '20', canStart = true) => ({status: 'ready' as const, authorization: authorization(tenant),
-  allows: (key: string) => key !== 'tianji.button.runs.start' || canStart, login: () => {},
+const auth = (tenant = '20') => ({status: 'ready' as const, authorization: authorization(tenant),
+  allows: () => true, login: () => {},
   logout: async () => {}, retry: async () => {}})
 const view = () => <MemoryRouter initialEntries={['/runs']}><Routes>
   <Route path="/runs" element={<AgentRunsPage />} /><Route path="/runs/:id" element={<div>详情页面</div>} />
@@ -26,26 +26,13 @@ describe('Agent run list', () => {
     vi.mocked(agentApi.list).mockResolvedValue({items: [run()], nextCursor: null})
   })
 
-  it('hides the start action without the declared permission', async () => {
-    vi.mocked(useAuth).mockReturnValue(auth('20', false))
+  it('keeps existing run navigation without exposing a legacy direct start', async () => {
     render(view())
     expect(await screen.findByText('research')).toBeInTheDocument()
     expect(screen.queryByRole('button', {name: '启动运行'})).not.toBeInTheDocument()
-  })
-
-  it('keeps the same idempotency key for a manually retried uncertain start', async () => {
-    vi.mocked(agentApi.start).mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce(run())
-    render(view())
-    fireEvent.click(await screen.findByRole('button', {name: '启动运行'}))
-    fireEvent.change(screen.getByLabelText('Agent 定义标识'), {target: {value: 'research'}})
-    fireEvent.change(screen.getByLabelText('任务内容'), {target: {value: 'question'}})
-    fireEvent.click(screen.getByRole('button', {name: /^启\s*动$/}))
-    expect(await screen.findByText(/提交结果暂时未知/)).toBeInTheDocument()
-    expect(agentApi.start).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('button', {name: '重试同一请求'}))
-    await waitFor(() => expect(agentApi.start).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(agentApi.start).mock.calls[0][1]).toEqual(vi.mocked(agentApi.start).mock.calls[1][1])
+    fireEvent.click(screen.getByRole('button', {name: '查看'}))
     expect(await screen.findByText('详情页面')).toBeInTheDocument()
+    expect(agentApi.list).toHaveBeenCalledWith('20', undefined, expect.any(AbortSignal))
   })
 
   it('does not render a late page from the previous tenant', async () => {
