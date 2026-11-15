@@ -14,6 +14,7 @@ vi.mock('../api/processWorkerFailures', async () => {
 })
 
 const PAGE = 'tianji.page.workerFailures'
+const PROCESS_INSTANCE_PAGE = 'tianji.page.processInstance'
 const QUERY = '查询失败快照'
 const INPUT = '流程实例标识'
 const EMPTY = '此快照未返回 Worker 失败记录。'
@@ -29,7 +30,7 @@ type Snapshot = Awaited<ReturnType<typeof processWorkerFailuresApi.get>>
 type Failure = Snapshot['failures'][number]
 type IdentityChange = Readonly<{tenant?: string; issuer?: string; subject?: string; epoch?: number}>
 
-const auth = (change: IdentityChange = {}, allowed = true): ReturnType<typeof useAuth> => {
+const auth = (change: IdentityChange = {}, allowed = true, processInstance = false): ReturnType<typeof useAuth> => {
   const value = authorization(change.tenant ?? '20', ['TIANJI_PROCESS_READ', 'TIANJI_PROCESS_WORKER_RECOVER'])
   const issuer = change.issuer ?? value.identity.issuer
   const subject = change.subject ?? value.identity.subject
@@ -38,7 +39,7 @@ const auth = (change: IdentityChange = {}, allowed = true): ReturnType<typeof us
     authorization: {...value, identity: {...value.identity, issuer, subject},
       snapshot: {...value.snapshot, issuer, subject},
       binding: {...value.binding, issuer, subject, requestEpoch: change.epoch ?? value.binding.requestEpoch}},
-    allows: (resource: string) => resource === PAGE && allowed,
+    allows: (resource: string) => resource === PAGE ? allowed : resource === PROCESS_INSTANCE_PAGE && processInstance,
     login: () => {}, logout: async () => {}, retry: async () => {},
   }
 }
@@ -125,6 +126,29 @@ describe('Worker failure observations', () => {
     expect(screen.queryByText(VERSION, {exact: false})).not.toBeInTheDocument()
     expect(screen.queryByRole('button', {name: /恢复|取消|重试/})).not.toBeInTheDocument()
     expect(processWorkerFailuresApi.get).toHaveBeenCalledTimes(1)
+  })
+
+  it('links an observed Worker snapshot to its instance when the instance page is readable', async () => {
+    currentAuth = auth({}, true, true)
+    vi.mocked(processWorkerFailuresApi.get).mockResolvedValueOnce(snapshot('pi-1', [visibleFailure()]))
+    render(view())
+    observe('pi-1')
+
+    expect(await screen.findByRole('link', {name: '查看流程实例'})).toHaveAttribute('href', '/process-instances/pi-1')
+    expect(screen.getByText('已报告可重试')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {name: /恢复|取消|重试/})).not.toBeInTheDocument()
+    expect(processWorkerFailuresApi.get).toHaveBeenCalledExactlyOnceWith('20', 'pi-1', expect.any(AbortSignal))
+  })
+
+  it('does not turn Worker recovery permission into instance observation permission', async () => {
+    vi.mocked(processWorkerFailuresApi.get).mockResolvedValueOnce(snapshot('pi-1', [visibleFailure()]))
+    render(view())
+    observe('pi-1')
+
+    expect(await screen.findByText('job-ready')).toBeInTheDocument()
+    expect(screen.queryByRole('link', {name: '查看流程实例'})).toBeNull()
+    expect(screen.getByText('已报告可重试')).toBeInTheDocument()
+    expect(processWorkerFailuresApi.get).toHaveBeenCalledExactlyOnceWith('20', 'pi-1', expect.any(AbortSignal))
   })
 
   it('distinguishes an empty observation from not-visible and unavailable reads', async () => {

@@ -1,11 +1,13 @@
 import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Form, Input, Space, Table, Tag, Typography, type TableColumnsType} from 'antd'
 import {useLayoutEffect, useRef, useState} from 'react'
+import {Link} from 'react-router-dom'
 import {isProcessInstanceId, processWorkerFailuresApi, type ProcessWorkerFailure,
   type ProcessWorkerFailures} from '../api/processWorkerFailures'
 import {useAuth} from '../auth/AuthContext'
 
 const PAGE = 'tianji.page.workerFailures'
+const PROCESS_INSTANCE_PAGE = 'tianji.page.processInstance'
 const INVALID_ID = '请输入有效的流程实例标识。'
 
 const statuses: Record<ProcessWorkerFailure['status'], string> = {
@@ -142,6 +144,9 @@ function WorkerFailureLookup({tenant}: {tenant: string}) {
     {state.phase === 'snapshot' && <Card variant="borderless" className="surface-card" title="Worker 失败快照">
       <Space orientation="vertical" className="full-width">
         <Typography.Text>流程实例标识：{state.snapshot.instanceId}</Typography.Text>
+        {allows(PROCESS_INSTANCE_PAGE) && <Link to={'/process-instances/' + encodeURIComponent(state.snapshot.instanceId)}>
+          查看流程实例
+        </Link>}
         <Typography.Text>观察时间：<time dateTime={state.snapshot.observedAt}>{state.snapshot.observedAt} UTC</time></Typography.Text>
         {state.snapshot.failures.length === 0
           ? <Alert type="info" showIcon title="此快照未返回 Worker 失败记录。" />

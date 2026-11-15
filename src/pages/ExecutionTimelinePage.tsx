@@ -14,6 +14,7 @@ import {useAuth} from '../auth/AuthContext'
 import {StatusTag} from './AgentRunsPage'
 
 const PAGE = 'tianji.page.processCorrelations'
+const PROCESS_INSTANCE_PAGE = 'tianji.page.processInstance'
 const AGENT_PAGE = 'tianji.page.runs'
 const AGENT_DETAIL = 'tianji.page.runDetail'
 const RELEASE_PAGE = 'tianji.page.processReleases'
@@ -227,6 +228,9 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
       <Space orientation="vertical" className="full-width">
         <Typography.Text type="secondary">来源：Process 实例快照</Typography.Text>
         <Typography.Text>流程实例标识：{detail.snapshot.instanceId}</Typography.Text>
+        {allows(PROCESS_INSTANCE_PAGE) && <Link to={'/process-instances/' + encodeURIComponent(detail.snapshot.instanceId)}>
+          查看流程实例
+        </Link>}
         <Typography.Text>定义标识：{detail.snapshot.definitionKey}</Typography.Text>
         <Typography.Text>发布版本：{detail.snapshot.releaseVersion}</Typography.Text>
         <Typography.Text>业务标识：{detail.snapshot.businessKey}</Typography.Text>

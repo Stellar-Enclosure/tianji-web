@@ -30,6 +30,7 @@ vi.mock('../api/processCorrelations', async () => {
 })
 
 const PAGE = 'tianji.page.processCorrelations'
+const PROCESS_INSTANCE_PAGE = 'tianji.page.processInstance'
 const AGENT_PAGE = 'tianji.page.runs'
 const AGENT_DETAIL = 'tianji.page.runDetail'
 const AGENT_QUERY_BUTTON = '查询同关联标识的 Agent 运行'
@@ -48,10 +49,12 @@ const findAgentButton = () => screen.findByRole('button', {name: AGENT_QUERY_BUT
 const receipt = {instanceId: 'instance-1', releaseVersion: 'release-1', submittedAt: '2026-11-05T10:30:00.123456Z'}
 const page = (correlationId = CORRELATION): ProcessCorrelationPage =>
   ({correlationId, observedAt: '2026-11-05T11:00:01.123456Z', items: [receipt], nextCursor: null})
-const auth = (tenant = '20', allowed = true, epoch?: number, agent = false, detail = agent): ReturnType<typeof useAuth> => {
+const auth = (tenant = '20', allowed = true, epoch?: number, agent = false, detail = agent,
+  processInstance = false): ReturnType<typeof useAuth> => {
   const frame = authorization(tenant, agent ? ['TIANJI_PROCESS_READ', 'TIANJI_AGENT_READ'] : ['TIANJI_PROCESS_READ'])
   return {status: 'ready', authorization: {...frame, binding: {...frame.binding, requestEpoch: epoch ?? frame.binding.requestEpoch}},
-    allows: resource => resource === PAGE ? allowed : resource === AGENT_PAGE ? agent : resource === AGENT_DETAIL && detail,
+    allows: resource => resource === PAGE ? allowed : resource === PROCESS_INSTANCE_PAGE ? processInstance
+      : resource === AGENT_PAGE ? agent : resource === AGENT_DETAIL && detail,
     login: () => {}, logout: async () => {}, retry: async () => {}}
 }
 const snapshot = (): ProcessInstanceSnapshot => ({
@@ -236,6 +239,37 @@ describe('Process correlation page', () => {
     expect(await screen.findByText('来源：Process 实例快照')).toBeInTheDocument()
     expect(screen.queryByRole('button', {name: '读取目标发布摘要'})).toBeNull()
     expect(processReleasesApi.get).not.toHaveBeenCalled()
+  })
+
+  it('links the selected Process snapshot only with the instance observation page permission', async () => {
+    current = auth('20', true, undefined, false, false, true)
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValue(snapshot())
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+
+    expect(await screen.findByRole('link', {name: '查看流程实例'})).toHaveAttribute(
+      'href', '/process-instances/instance-1',
+    )
+    expect(processCorrelationsApi.detail).toHaveBeenCalledExactlyOnceWith(
+      '20', CORRELATION, receipt, expect.any(AbortSignal),
+    )
+    expect(agentApi.listByCorrelation).not.toHaveBeenCalled()
+  })
+
+  it('keeps the selected Process snapshot visible without linking when instance observation is denied', async () => {
+    vi.mocked(processCorrelationsApi.detail).mockResolvedValue(snapshot())
+    render(screenWithRouter())
+    fillWindow()
+    submit()
+    fireEvent.click(await screen.findByRole('button', {name: '查看详情'}))
+
+    expect(await screen.findByText('来源：Process 实例快照')).toBeInTheDocument()
+    expect(screen.getByText('流程实例标识：instance-1')).toBeInTheDocument()
+    expect(screen.queryByRole('link', {name: '查看流程实例'})).toBeNull()
+    expect(processCorrelationsApi.detail).toHaveBeenCalledTimes(1)
+    expect(agentApi.listByCorrelation).not.toHaveBeenCalled()
   })
 
   it('submits an exact current-tenant correlation window only on explicit query', async () => {

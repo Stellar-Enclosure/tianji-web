@@ -22,3 +22,48 @@ body { margin: 0; }
 @media (max-width: 900px) { .detail-grid { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .page-heading { flex-direction: column; } .page-heading > .ant-space { align-self: stretch; } }
 @media (max-width: 700px) { .memory-comparison-grid { grid-template-columns: 1fr; } }
+
+.process-instance-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+.process-instance-layout > *,
+.process-instance-layout__output,
+.process-graph { min-width: 0; }
+.process-instance-layout code { overflow-wrap: anywhere; }
+.process-graph > summary { cursor: pointer; padding: 8px; }
+.process-graph-canvas {
+  min-width: 0;
+  max-height: min(70vh, 720px);
+  padding: 4px;
+  overflow: auto;
+  scroll-padding: 12px;
+}
+.process-graph-canvas svg { display: block; }
+.process-graph-node { cursor: pointer; }
+.process-graph-node:focus-visible .process-graph-node-shape { stroke: #1677ff; stroke-width: 3; }
+.process-graph-list { min-width: 0; overflow-wrap: anywhere; }
+.process-graph-list-node {
+  max-width: 100%;
+  margin-block: 3px;
+  padding: 5px 8px;
+  border: 1px solid #b6c2d1;
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.process-graph-list-node[aria-pressed="true"] { border-color: #1677ff; background: #eaf4ff; }
+.process-graph-list-node:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+.process-node-output,
+.process-instance-layout__output pre { max-width: 100%; max-height: 420px; overflow: auto; }
+.process-editor-source { max-width: 100%; overflow: auto; tab-size: 2; }
+@media (max-width: 900px) {
+  .process-instance-layout { grid-template-columns: minmax(0, 1fr); }
+}
