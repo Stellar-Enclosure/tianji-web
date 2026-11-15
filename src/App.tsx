@@ -1,31 +1,64 @@
-import {AppstoreOutlined, AuditOutlined, FileTextOutlined, FolderOpenOutlined, InboxOutlined, LogoutOutlined, WarningOutlined} from '@ant-design/icons'
+import {AppstoreOutlined, AuditOutlined, FileSearchOutlined, FileTextOutlined, FolderOpenOutlined, LogoutOutlined, WarningOutlined} from '@ant-design/icons'
 import {EnterpriseLayout, type EnterpriseLayoutConfig} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Result, Spin, Tag} from 'antd'
-import type {ReactNode} from 'react'
-import {BrowserRouter, Navigate, Outlet, Route, Routes} from 'react-router-dom'
+import {useState, type ReactNode} from 'react'
+import {createBrowserRouter, Link, matchPath, Navigate, Outlet, Route, RouterProvider, Routes, useLocation} from 'react-router-dom'
 import {AuthProvider, useAuth} from './auth/AuthContext'
 import AgentRunDetailPage from './pages/AgentRunDetailPage'
 import AgentRunsPage from './pages/AgentRunsPage'
-import MemoryCandidatesPage from './pages/MemoryCandidatesPage'
 import CaseDetailPage from './pages/CaseDetailPage'
-import TaskDetailPage from './pages/TaskDetailPage'
-import TaskInboxPage from './pages/TaskInboxPage'
 import WorkerFailuresPage from './pages/WorkerFailuresPage'
 import DefinitionReleasePage from './pages/DefinitionReleasePage'
 import ExecutionTimelinePage from './pages/ExecutionTimelinePage'
+import ProcessDefinitionWorkspacePage from './pages/ProcessDefinitionWorkspacePage'
+import ProcessDraftEditorPage from './pages/ProcessDraftEditorPage'
+import ProcessInstanceLookupPage from './pages/ProcessInstanceLookupPage'
+import ProcessInstancePage from './pages/ProcessInstancePage'
 
-const configuredBase: string = import.meta.env.VITE_BASE_PATH ?? '/'
-if (!configuredBase.startsWith('/') || configuredBase.startsWith('//') || /[\\?#%]/.test(configuredBase)
-    || /\/{2,}/.test(configuredBase) || [...configuredBase].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
-    || configuredBase.split('/').some(segment => segment === '.' || segment === '..')) throw new Error('Invalid VITE_BASE_PATH')
-const basePath = configuredBase === '/' ? '/' : configuredBase.replace(/\/?$/, '/')
+const legacyBookmarks = ['/tasks', '/tasks/:taskId', '/memory'] as const
+const landingPages = [
+  ['tianji.page.processDefinitions', '/process-definitions'],
+  ['tianji.page.processReleases', '/operations/process-releases'],
+  ['tianji.page.processCorrelations', '/operations/process-correlations'],
+  ['tianji.page.processInstances', '/process-instances'],
+  ['tianji.page.runs', '/runs'],
+  ['tianji.page.cases', '/cases'],
+] as const
 
-export default function App() {
-  return <AuthProvider><BrowserRouter basename={basePath}><SessionRoutes /></BrowserRouter></AuthProvider>
+export function createConsoleRouter() {
+  const configuredBase: string = import.meta.env.VITE_BASE_PATH ?? '/'
+  if (!configuredBase.startsWith('/') || configuredBase.startsWith('//') || /[\\?#%]/.test(configuredBase)
+      || /\/{2,}/.test(configuredBase) || [...configuredBase].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+      || configuredBase.split('/').some(segment => segment === '.' || segment === '..')) throw new Error('Invalid VITE_BASE_PATH')
+  const basename = configuredBase === '/' ? '/' : configuredBase.replace(/\/?$/, '/')
+  return createBrowserRouter([{path: '*', element: <ConsoleEntry />}], {basename})
 }
 
-function SessionRoutes() {
+export default function App({router}: {router: ReturnType<typeof createConsoleRouter>}) {
+  return <RouterProvider router={router} />
+}
+
+function ConsoleEntry() {
+  const {pathname} = useLocation()
+  const legacy = legacyBookmarks.some(path => matchPath({path, caseSensitive: true, end: true}, pathname) !== null)
+  const [sessionStarted, setSessionStarted] = useState(!legacy)
+  if (!sessionStarted) {
+    if (legacy) return <LegacyBusinessHandoff />
+    setSessionStarted(true)
+  }
+  return <AuthProvider><SessionRoutes legacy={legacy} /></AuthProvider>
+}
+
+function LegacyBusinessHandoff({canReturn = false}: {canReturn?: boolean}) {
+  return <main className="auth-shell"><Card variant="borderless" className="auth-card">
+    <Result status="info" title="此能力由业务平台提供"
+      extra={canReturn ? <Link to="/">返回控制台</Link> : undefined} />
+  </Card></main>
+}
+
+function SessionRoutes({legacy}: {legacy: boolean}) {
   const {status, error, login, retry, allows} = useAuth()
+  if (legacy) return <LegacyBusinessHandoff canReturn={status === 'ready' && allows('tianji.app.console')} />
   if (status === 'loading') return <Spin fullscreen description="正在验证会话" />
   if (status !== 'ready') {
     return <main className="auth-shell"><Card variant="borderless" className="auth-card">
@@ -36,17 +69,17 @@ function SessionRoutes() {
           : <Button type="primary" onClick={() => void retry()}>重新验证</Button>} />
     </Card></main>
   }
-  const landing = ([['tianji.page.runs', '/runs'], ['tianji.page.memoryCandidates', '/memory'], ['tianji.page.taskInbox', '/tasks'],
-    ['tianji.page.cases', '/cases']] as const)
-    .find(([resource]) => allows(resource))?.[1]
+  const landing = landingPages.find(([resource]) => allows(resource))?.[1]
   return <Routes>
     <Route element={<Shell />}>
       <Route index element={landing ? <Navigate to={landing} replace /> : <Result status="403" title="没有可访问的页面" />} />
+      <Route path="/process-definitions" element={<RequireResource resource="tianji.page.processDefinitions"><ProcessDefinitionWorkspacePage /></RequireResource>} />
+      <Route path="/process-definitions/new" element={<RequireResource resource="tianji.page.processDefinitions"><ProcessDefinitionWorkspacePage /></RequireResource>} />
+      <Route path="/process-definitions/drafts/:draftId" element={<RequireResource resource="tianji.page.processDraftEditor"><ProcessDraftEditorPage /></RequireResource>} />
+      <Route path="/process-instances" element={<RequireResource resource="tianji.page.processInstances"><ProcessInstanceLookupPage /></RequireResource>} />
+      <Route path="/process-instances/:instanceId" element={<RequireResource resource="tianji.page.processInstance"><ProcessInstancePage /></RequireResource>} />
       <Route path="/runs" element={<RequireResource resource="tianji.page.runs"><AgentRunsPage /></RequireResource>} />
       <Route path="/runs/:runId" element={<RequireResource resource="tianji.page.runDetail"><AgentRunDetailPage /></RequireResource>} />
-      <Route path="/memory" element={<RequireResource resource="tianji.page.memoryCandidates"><MemoryCandidatesPage /></RequireResource>} />
-      <Route path="/tasks" element={<RequireResource resource="tianji.page.taskInbox"><TaskInboxPage /></RequireResource>} />
-      <Route path="/tasks/:taskId" element={<RequireResource resource="tianji.page.taskDetail"><TaskDetailPage /></RequireResource>} />
       <Route path="/cases" element={<RequireResource resource="tianji.page.cases"><CaseDetailPage /></RequireResource>} />
       <Route path="/cases/:caseInstanceId" element={<RequireResource resource="tianji.page.caseDetail"><CaseDetailPage /></RequireResource>} />
       <Route path="/operations/worker-failures" element={<RequireResource resource="tianji.page.workerFailures"><WorkerFailuresPage /></RequireResource>} />
@@ -69,16 +102,18 @@ function Shell() {
   const config: EnterpriseLayoutConfig = {
     platformName: '天机 · 智能编排',
     navigation: [
-      ...(allows('tianji.menu.runs') ? [{key: 'runs', label: '运行记录', path: '/runs', activePathPrefixes: ['/runs'], icon: <AppstoreOutlined />}] : []),
-      ...(allows('tianji.menu.memoryCandidates') ? [{key: 'memory', label: '候选记忆', path: '/memory', activePathPrefixes: ['/memory'], icon: <AuditOutlined />}] : []),
-      ...(allows('tianji.menu.tasks') ? [{key: 'tasks', label: '任务箱', path: '/tasks', activePathPrefixes: ['/tasks'], icon: <InboxOutlined />}] : []),
-      ...(allows('tianji.menu.cases') ? [{key: 'cases', label: '案件查询', path: '/cases', activePathPrefixes: ['/cases'], icon: <FolderOpenOutlined />}] : []),
-      ...(allows('tianji.menu.workerFailures') ? [{key: 'workerFailures', label: 'Worker 失败观察', path: '/operations/worker-failures',
-        activePathPrefixes: ['/operations/worker-failures'], icon: <WarningOutlined />}] : []),
+      ...(allows('tianji.menu.processDefinitions') ? [{key: 'processDefinitions', label: '流程设计', path: '/process-definitions',
+        activePathPrefixes: ['/process-definitions'], icon: <FolderOpenOutlined />}] : []),
       ...(allows('tianji.menu.processReleases') ? [{key: 'processReleases', label: '流程发布元数据', path: '/operations/process-releases',
         activePathPrefixes: ['/operations/process-releases'], icon: <FileTextOutlined />}] : []),
       ...(allows('tianji.menu.processCorrelations') ? [{key: 'processCorrelations', label: '流程关联查询', path: '/operations/process-correlations',
         activePathPrefixes: ['/operations/process-correlations'], icon: <AuditOutlined />}] : []),
+      ...(allows('tianji.menu.processInstances') ? [{key: 'processInstances', label: '流程实例查找', path: '/process-instances',
+        activePathPrefixes: ['/process-instances'], icon: <FileSearchOutlined />}] : []),
+      ...(allows('tianji.menu.workerFailures') ? [{key: 'workerFailures', label: 'Worker 失败观察', path: '/operations/worker-failures',
+        activePathPrefixes: ['/operations/worker-failures'], icon: <WarningOutlined />}] : []),
+      ...(allows('tianji.menu.runs') ? [{key: 'runs', label: '运行记录', path: '/runs', activePathPrefixes: ['/runs'], icon: <AppstoreOutlined />}] : []),
+      ...(allows('tianji.menu.cases') ? [{key: 'cases', label: '案件查询', path: '/cases', activePathPrefixes: ['/cases'], icon: <FolderOpenOutlined />}] : []),
     ],
     actions: <Tag color="success">会话已验证</Tag>,
     user: {name: authorization.identity.subject, description: `租户 ${authorization.identity.tenantId}`,

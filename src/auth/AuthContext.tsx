@@ -24,6 +24,80 @@ type AuthValue = Readonly<{
 
 const AuthContext = createContext<AuthValue | null>(null)
 
+const draftOwnerDomain = 'TIANJI_PROCESS_DRAFT_OWNER_V1'
+const recoveryKeyDomains = [
+  ['tianji.process-draft-create.v1', draftOwnerDomain],
+  ['tianji.process-start.v2', draftOwnerDomain],
+  ['tianji.process-draft-editor.v1:', draftOwnerDomain],
+  ['tianji.process-activation.v1:', 'TIANJI_PROCESS_ACTIVATION_OWNER_V1'],
+  ['tianji.process-instance-cancel.v1:', 'TIANJI_PROCESS_CANCEL_OWNER_V1'],
+] as const
+
+function storedRecoverySlots(storage: Storage) {
+  const slots: {key: string; domain: string}[] = []
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index)
+    if (key === null) continue
+    const match = recoveryKeyDomains.find(([scope]) => scope.endsWith(':') ? key.startsWith(scope) : key === scope)
+    if (match) slots.push({key, domain: match[1]})
+  }
+  return slots
+}
+
+async function recoveryOwnerFingerprints(identity: GatewayIdentityResult) {
+  try {
+    const domains = new Set(storedRecoverySlots(sessionStorage).map(slot => slot.domain))
+    const encoder = new TextEncoder()
+    const digests = await Promise.allSettled(Array.from(domains, async domain => {
+      const bytes = encoder.encode(JSON.stringify([domain, identity.issuer, identity.subject]))
+      const digest = await crypto.subtle.digest('SHA-256', bytes)
+      const fingerprint = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+      return [domain, fingerprint] as const
+    }))
+    return new Map(digests.flatMap(result => result.status === 'fulfilled' ? [result.value] : []))
+  } catch {
+    // Authentication still works when the browser cannot inspect recovery storage.
+    return new Map<string, string>()
+  }
+}
+
+function parseRecoveryOwner(raw: string | null) {
+  if (raw === null) return undefined
+  try {
+    const value: unknown = JSON.parse(raw)
+    if (typeof value === 'object' && value !== null && 'tenantId' in value && 'actorFingerprint' in value
+        && typeof value.tenantId === 'string' && typeof value.actorFingerprint === 'string'
+        && /^[0-9a-f]{64}$/.test(value.actorFingerprint)) {
+      return {tenantId: value.tenantId, actorFingerprint: value.actorFingerprint}
+    }
+  } catch {
+    // A malformed slot cannot identify a replay owner.
+  }
+  return undefined
+}
+
+function pruneRecoveryPointers(tenantId: string, fingerprints: ReadonlyMap<string, string>) {
+  try {
+    for (const {key, domain} of storedRecoverySlots(sessionStorage)) {
+      const owner = parseRecoveryOwner(sessionStorage.getItem(key))
+      const fingerprint = fingerprints.get(domain)
+      if (!owner || owner.tenantId !== tenantId || (fingerprint !== undefined && owner.actorFingerprint !== fingerprint)) {
+        sessionStorage.removeItem(key)
+      }
+    }
+  } catch {
+    // The operation pages check recovery storage before sending commands.
+  }
+}
+
+function clearRecoveryPointers() {
+  try {
+    for (const {key} of storedRecoverySlots(sessionStorage)) sessionStorage.removeItem(key)
+  } catch {
+    // A browser can disallow session storage independently of the EDGE session.
+  }
+}
+
 export function AuthProvider({children}: {children: ReactNode}) {
   const [authorization, setAuthorization] = useState<Authorization>()
   const [status, setStatus] = useState<AuthStatus>('loading')
@@ -44,11 +118,16 @@ export function AuthProvider({children}: {children: ReactNode}) {
       const identity = await gatewayAuth.identity(controller.signal)
       if (serial !== sequence.current) return
       const captured = gatewayAuth.context.capture(controller.signal)
+      if (!isCanonicalTenant(identity.tenantId)) throw new Error('可信租户上下文不可用')
+      const fingerprints = await recoveryOwnerFingerprints(identity)
+      captured.assertCurrent()
+      if (serial !== sequence.current) return
+      pruneRecoveryPointers(identity.tenantId, fingerprints)
       const snapshot = await gatewayAuth.bootstrap<unknown>('/api/v1/authorization/effective-permissions', captured.signal)
       captured.assertCurrent()
       const namespace = import.meta.env.VITE_PERMISSION_NAMESPACE ?? ''
       const environment = import.meta.env.VITE_PERMISSION_ENVIRONMENT ?? ''
-      if (!namespace || !environment || !isCanonicalTenant(identity.tenantId) || !isPermissionSnapshot(snapshot)
+      if (!namespace || !environment || !isPermissionSnapshot(snapshot)
         || snapshot.issuer !== identity.issuer || snapshot.subject !== identity.subject
         || snapshot.catalogScope.tenantId !== identity.tenantId || snapshot.catalogScope.businessCode !== 'xingyuan'
         || snapshot.catalogScope.applicationCode !== 'tianji' || snapshot.catalogScope.namespaceCode !== namespace
@@ -103,11 +182,18 @@ export function AuthProvider({children}: {children: ReactNode}) {
 
   const login = useCallback(() => gatewayAuth.login(), [])
   const logout = useCallback(async () => {
+    const resultPromise = gatewayAuth.logout()
+    // The SDK invalidates the previous epoch synchronously as logout begins.
+    const epoch = gatewayAuth.context.epoch
+    const serial = sequence.current
+    const isCurrent = () => epoch === gatewayAuth.context.epoch && serial === sequence.current
     try {
-      const result = await gatewayAuth.logout()
+      const result = await resultPromise
+      if (!isCurrent()) return
+      if (result.status === 'LOCAL_CLOSED') clearRecoveryPointers()
       if (result.remoteState !== 'CONFIRMED') setError('本地会话已关闭，远端退出状态尚未确认。')
     } catch {
-      setError('退出操作未完成，请重试。')
+      if (isCurrent()) setError('退出操作未完成，请重试。')
     }
   }, [])
   const allows = useCallback((resource: string) => !!authorization

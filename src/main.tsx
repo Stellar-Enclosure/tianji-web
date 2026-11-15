@@ -2,7 +2,7 @@ import {StrictMode} from 'react'
 import {createRoot, type Root} from 'react-dom/client'
 import {AdminThemeProvider, I18nProvider, initI18n, injectTokens} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import 'antd/dist/reset.css'
-import App from './App'
+import App, {createConsoleRouter} from './App'
 import './styles.css'
 
 injectTokens()
@@ -16,14 +16,24 @@ interface RuntimeWindow extends Window {
 }
 const runtime = window as RuntimeWindow
 let root: Root | undefined
+let router: ReturnType<typeof createConsoleRouter> | undefined
 const mount = () => {
   if (root) return
   const element = document.getElementById('root')
   if (!element) throw new Error('Root element is missing')
+  router = createConsoleRouter()
   root = createRoot(element)
-  root.render(<StrictMode><I18nProvider><AdminThemeProvider><App /></AdminThemeProvider></I18nProvider></StrictMode>)
+  root.render(<StrictMode><I18nProvider><AdminThemeProvider><App router={router} /></AdminThemeProvider></I18nProvider></StrictMode>)
 }
-const unmount = () => { root?.unmount(); root = undefined }
+const unmount = () => {
+  try {
+    root?.unmount()
+  } finally {
+    router?.dispose()
+    router = undefined
+    root = undefined
+  }
+}
 if (runtime.__POWERED_BY_WUJIE__) {
   runtime.__WUJIE_MOUNT = mount
   runtime.__WUJIE_UNMOUNT = unmount
