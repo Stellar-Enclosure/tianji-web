@@ -92,6 +92,12 @@ export type PublishProcessDraftCommand = ValidateProcessDraftQuery & Readonly<{r
 export type CreateProcessDraftCommand = Readonly<{title: string; baseReleaseVersion?: string | null; commandId: string}>
 export type DiscardProcessDraftCommand = Readonly<{commandId: string; expectedRevision: number}>
 export type SaveProcessDraftCommand = DiscardProcessDraftCommand & Readonly<{title: string; content: DraftContentVO}>
+export type PreparedDraftSave = Readonly<{
+  draftId: string
+  path: string
+  body: SaveProcessDraftCommand
+  serializedBody: string
+}>
 export type ListProcessDraftsQuery = Readonly<{limit?: number}> & (
   | Readonly<{definitionKey?: string; state?: DraftState; cursor?: string; creationCommandId?: never}>
   | Readonly<{creationCommandId: string; definitionKey?: never; state?: never; cursor?: never}>
@@ -374,21 +380,36 @@ function listParameters(query: ListProcessDraftsQuery): URLSearchParams {
   return params
 }
 
-function write(path: string, tenant: string, method: 'POST' | 'PUT', value: object, signal?: AbortSignal) {
+function write(path: string, tenant: string, value: object, signal?: AbortSignal) {
   const body = JSON.stringify(value)
-  if (method === 'PUT' && utf8.encode(body).length > MAX_SAVE_BYTES) return invalidRequest()
-  return requestJson<unknown>(path, tenant, {method, cache: 'no-store', body, signal}, 200)
+  return requestJson<unknown>(path, tenant, {method: 'POST', cache: 'no-store', body, signal}, 200)
 }
 
 function read(path: string, tenant: string, signal?: AbortSignal) {
   return requestJson<unknown>(path, tenant, {method: 'GET', cache: 'no-store', signal}, 200)
 }
 
+export function prepareDraftSave(draftId: string, body: SaveProcessDraftCommand): PreparedDraftSave {
+  const path = draftPath(draftId)
+  if (!exactObject(body, [...MUTATION_FIELDS, 'title', 'content']) || !titleText(body.title)) return invalidRequest()
+  const expected = checkMutation(body)
+  const content = decodeContent(body.content, invalidRequest)
+  const preparedBody: SaveProcessDraftCommand = {
+    commandId: expected.commandId,
+    expectedRevision: expected.expectedRevision,
+    title: body.title,
+    content,
+  }
+  const serializedBody = JSON.stringify(preparedBody)
+  if (utf8.encode(serializedBody).length > MAX_SAVE_BYTES) return invalidRequest()
+  return {draftId, path, body: preparedBody, serializedBody}
+}
+
 export const processDraftsApi = {
   async validate(tenant: string, body: ValidateProcessDraftQuery, signal?: AbortSignal): Promise<DraftValidationResultDTO> {
     if (!exactObject(body, REVISION_FIELDS)) return invalidRequest()
     const expected = checkExpectedRevision(body)
-    return parseValidation(await write(`${BASE}/process-model-validations`, tenant, 'POST', expected, signal), expected)
+    return parseValidation(await write(`${BASE}/process-model-validations`, tenant, expected, signal), expected)
   },
 
   async publish(tenant: string, body: PublishProcessDraftCommand, signal?: AbortSignal): Promise<DraftPublicationVO> {
@@ -396,7 +417,7 @@ export const processDraftsApi = {
     const {releaseVersion, commandId} = body
     if (!isProcessReleaseVersion(releaseVersion) || !matches(commandId, COMMAND_ID)) return invalidRequest()
     const expected = checkExpectedRevision(body)
-    const result = parsePublication(await write(`${BASE}/process-releases`, tenant, 'POST', {...expected, releaseVersion, commandId}, signal))
+    const result = parsePublication(await write(`${BASE}/process-releases`, tenant, {...expected, releaseVersion, commandId}, signal))
     if (result.draftId !== expected.draftId || result.publishedRevision !== expected.expectedRevision
         || result.releaseVersion !== releaseVersion || result.commandId !== commandId) return invalidResponse()
     return result
@@ -410,7 +431,7 @@ export const processDraftsApi = {
       return invalidRequest()
     }
     const path = `${BASE}/process-definitions/${encodeURIComponent(definitionKey)}/drafts`
-    const summary = parseSummary(await write(path, tenant, 'POST', {title, baseReleaseVersion, commandId}, signal))
+    const summary = parseSummary(await write(path, tenant, {title, baseReleaseVersion, commandId}, signal))
     if (summary.definitionKey !== definitionKey || summary.title !== title || summary.baseReleaseVersion !== (baseReleaseVersion ?? null)
         || summary.state !== 'EDITING' || summary.revision !== 1) return invalidResponse()
     return summary
@@ -428,17 +449,16 @@ export const processDraftsApi = {
   },
 
   async save(tenant: string, draftId: string, body: SaveProcessDraftCommand, signal?: AbortSignal): Promise<DraftMutationResultDTO> {
-    if (!exactObject(body, [...MUTATION_FIELDS, 'title', 'content']) || !titleText(body.title)) return invalidRequest()
-    const expected = checkMutation(body)
-    const content = decodeContent(body.content, invalidRequest)
-    const value = await write(draftPath(draftId), tenant, 'PUT', {...expected, title: body.title, content}, signal)
-    return parseMutation(value, draftId, expected, 'EDITING')
+    const prepared = prepareDraftSave(draftId, body)
+    const value = await requestJson<unknown>(prepared.path, tenant,
+      {method: 'PUT', cache: 'no-store', body: prepared.serializedBody, signal}, 200)
+    return parseMutation(value, prepared.draftId, prepared.body, 'EDITING')
   },
 
   async discard(tenant: string, draftId: string, body: DiscardProcessDraftCommand, signal?: AbortSignal): Promise<DraftMutationResultDTO> {
     if (!exactObject(body, MUTATION_FIELDS)) return invalidRequest()
     const expected = checkMutation(body)
-    const value = await write(`${draftPath(draftId)}/discard-commands`, tenant, 'POST', expected, signal)
+    const value = await write(`${draftPath(draftId)}/discard-commands`, tenant, expected, signal)
     return parseMutation(value, draftId, expected, 'DISCARDED')
   },
 }

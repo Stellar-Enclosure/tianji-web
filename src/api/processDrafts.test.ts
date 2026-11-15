@@ -1,6 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 import {gatewayAuth} from '../auth/gatewayAuth'
-import {processDraftsApi} from './processDrafts'
+import {prepareDraftSave, processDraftsApi} from './processDrafts'
 
 const base = '/api/tianji/v2'
 const draftId = 'pd:order-1'
@@ -95,6 +95,37 @@ afterEach(() => {
 })
 
 describe('Owner draft client', () => {
+  it('prepares an exact draft save synchronously before writing a recovery pointer', () => {
+    const fetcher = mockFetch()
+    const rawSource = '<definitions>\r\nunfinished "quoted" 🚀'
+    const command = {...save, content: {...content, models: [
+      {type: 'BPMN' as const, definitionKey: '', xml: rawSource},
+      {type: 'DMN' as const, definitionKey: 'pricing', xml: ''},
+    ], outputSchemaSource: '', eventRoutesSource: null}}
+    const prepared = prepareDraftSave(draftId, command)
+    expect(prepared.body.content).toEqual(command.content)
+    expect(prepared.serializedBody).toBe(JSON.stringify(command))
+
+    const invalid = {...command, content: {...command.content, models: [
+      {type: 'BPMN' as const, definitionKey: '', xml: '"'.repeat(2.8 * 1024 * 1024)},
+    ]}}
+    expect(() => prepareDraftSave(draftId, invalid)).toThrow()
+    expect(() => prepareDraftSave('../other', command)).toThrow()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('sends the same prevalidated body and preserves unknown transport failures', async () => {
+    const fetcher = mockFetch().mockResolvedValueOnce(response(mutation)).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const prepared = prepareDraftSave(draftId, save)
+    await expect(processDraftsApi.save('20', draftId, prepared.body)).resolves.toEqual(mutation)
+    expectRequest(fetcher.mock.calls[0], 'PUT', '/process-drafts/pd%3Aorder-1', '', save)
+    await expect(processDraftsApi.save('20', draftId, prepared.body)).rejects.toThrow('Failed to fetch')
+    expectRequest(fetcher.mock.calls[1], 'PUT', '/process-drafts/pd%3Aorder-1', '', save)
+
+    await expect(processDraftsApi.save('20', '../other', save)).rejects.toThrow()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
   it('validates a saved revision and consumes only closed typed validation results', async () => {
     const fetcher = mockFetch().mockResolvedValueOnce(response(validation)).mockResolvedValueOnce(response(valid))
     const controller = new AbortController()
