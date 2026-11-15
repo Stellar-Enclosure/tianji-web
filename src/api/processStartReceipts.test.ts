@@ -58,4 +58,39 @@ describe('Process owner START receipt client', () => {
     await expect(processStartReceiptsApi.get('20', query)).rejects.toMatchObject({status: 404})
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
+
+  it('uses the same owner GET to recover a V2 request by its original digest without replaying START', async () => {
+    const original = {
+      commandId: 'start:v2-receipt',
+      requestSha256: '7cfa4c0086eaadc9837ce74cbf54d7420a290d50fdad3d30db4ed485ff411323',
+    }
+    const fetcher = stub(receipt)
+    const controller = new AbortController()
+    await expect(processStartReceiptsApi.get('20', original, controller.signal)).resolves.toEqual(receipt)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    const [url, init] = fetcher.mock.calls[0]
+    const uri = new URL(String(url), 'https://example.test')
+    expect(uri.pathname).toMatch(/\/api\/tianji\/v1\/process-start-receipts$/)
+    expect(Object.fromEntries(uri.searchParams)).toEqual(original)
+    expect(init).toMatchObject({method: 'GET', cache: 'no-store'})
+    expect(init?.body).toBeUndefined()
+    controller.abort()
+    expect(init?.signal?.aborted).toBe(true)
+
+    const unknown = stub({code: 'TIANJI_RESOURCE_NOT_FOUND', correlationId: null}, 404)
+    await expect(processStartReceiptsApi.get('20', original)).rejects.toMatchObject({status: 404})
+    expect(unknown).toHaveBeenCalledTimes(1)
+    expect(unknown.mock.calls[0][1]?.method).toBe('GET')
+
+    for (const invalid of [
+      {...receipt, profile: 'AUTOMATION_V2'},
+      {...receipt, requestSha256: original.requestSha256},
+      {...receipt, variables: {amount: '1.00'}},
+      {...receipt, status: 'RECEIVED'},
+    ]) {
+      stub(invalid)
+      await expect(processStartReceiptsApi.get('20', original)).rejects.toThrow('服务返回的 START 回执无效')
+    }
+  })
+
 })
