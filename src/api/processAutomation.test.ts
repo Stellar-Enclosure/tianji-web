@@ -1,7 +1,8 @@
 import {webcrypto} from 'node:crypto'
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 import {gatewayAuth} from '../auth/gatewayAuth'
-import {parseAutomationGraph, parseStartVariablesJson, processAutomationApi, startRequestSha256} from './processAutomation'
+import {parseAutomationGraph, parseStartOverridesJson, parseStartVariablesJson, processAutomationApi,
+  startRequestSha256} from './processAutomation'
 
 const digest = 'a'.repeat(64)
 const timestamp = '2026-11-12T08:40:00.123456Z'
@@ -245,5 +246,28 @@ describe('Versioned process automation client', () => {
       '{"number":1.000000000000000001}', '{"number":1e-3000}', '{"number":1000000000000000}', '{"bad":"\\ud800"}',
       '{"missing":}', '[]',
     ]) expect(() => parseStartVariablesJson(raw)).toThrow()
+  })
+
+  it('validates the raw START override object with its independent UTF-8 budget', async () => {
+    const overrides = {agentNode: {parameters: {amount: '1.00', text: '中'.repeat(24 * 1024)}}}
+    const source = JSON.stringify(overrides)
+    const checked = parseStartOverridesJson(source)
+    expect(checked).toEqual(overrides)
+    expect(() => parseStartVariablesJson(source)).toThrow()
+    await expect(startRequestSha256({...start, agentTaskOverrides: checked})).resolves.toMatch(/^[a-f0-9]{64}$/)
+    const overflow = {agentNode: {parameters: {text: '中'.repeat(88 * 1024)}}}
+    expect(() => parseStartOverridesJson(JSON.stringify(overflow))).toThrow()
+  })
+
+  it('rejects duplicate escaped keys, fractional tokens and unknown fields in raw overrides', () => {
+    for (const source of [
+      'null',
+      '{"agentNode":null}',
+      '{"agentNode":{}}',
+      '{"agentNode":{"parameters":{},"extra":0}}',
+      '{"agentNode":{"parameters":{"number":1,"\\u006eumber":2}}}',
+      '{"agentNode":{"parameters":{"number":1.000000000000000001}}}',
+      '{"agentNode":{"parameters":{"number":1e0}}}',
+    ]) expect(() => parseStartOverridesJson(source)).toThrow()
   })
 })

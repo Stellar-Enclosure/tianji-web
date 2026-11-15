@@ -9,6 +9,7 @@ export type TypedDataObject = {readonly [key: string]: TypedJsonValue}
 type TemplateRef = Readonly<{key: string; version: number; contentSha256: string}>
 type AgentTaskOverride = Readonly<{templateRef: TemplateRef; parameters?: TypedDataObject}>
   | Readonly<{templateRef?: TemplateRef; parameters: TypedDataObject}>
+type AgentTaskOverrides = Readonly<Record<string, AgentTaskOverride>>
 
 export type AutomationStartCommand = Readonly<{
   definitionKey: string
@@ -16,7 +17,7 @@ export type AutomationStartCommand = Readonly<{
   commandId: string
   correlationId: string
   variables: TypedDataObject
-  agentTaskOverrides?: Readonly<Record<string, AgentTaskOverride>>
+  agentTaskOverrides?: AgentTaskOverrides
 }>
 
 type GraphNode = Readonly<{id: string; kind: string; name: string}>
@@ -298,7 +299,7 @@ function isArray(value: unknown): value is readonly unknown[] {
 }
 
 /** Read source form JSON before duplicate keys or numeric token spelling are lost. */
-export function parseStartVariablesJson(source: string): TypedDataObject {
+function parseSourceJson(source: string): unknown {
   if (source.length > maxStartBodyBytes || utf8.encode(source).byteLength > maxStartBodyBytes) return invalidTypedData()
   const value: unknown = JSON.parse(source)
   const objects: (Set<string> | null)[] = []
@@ -323,17 +324,21 @@ export function parseStartVariablesJson(source: string): TypedDataObject {
         } else if (!/^-?\d+(?![\s\S])/.test(token)) return invalidTypedData()
     }
   }
-  return parseTypedDataObject(value)
+  return value
 }
 
-function startWire(value: unknown) {
-  const required = ['definitionKey', 'businessKey', 'commandId', 'correlationId', 'variables']
-  if (!closed(value, required, ['agentTaskOverrides']) || !logicalId(value.definitionKey)
-      || !logicalId(value.commandId) || value.commandId.startsWith('evt-v2-') || !logicalId(value.correlationId)
-      || !opaque(value.businessKey, 255) || boundaryWhitespace.test(value.businessKey) || !record(value.variables)) return invalidStart()
+export function parseStartVariablesJson(source: string): TypedDataObject {
+  return parseTypedDataObject(parseSourceJson(source))
+}
 
-  const hasOverrides = Object.hasOwn(value, 'agentTaskOverrides')
-  const overrides = hasOverrides ? value.agentTaskOverrides : {}
+export function parseStartOverridesJson(source: string): AgentTaskOverrides {
+  const overrides = parseSourceJson(source)
+  validateStartOverrides(overrides)
+  typedJson(overrides, overrideBytes, typedDepth + 2)
+  return overrides
+}
+
+function validateStartOverrides(overrides: unknown): asserts overrides is AgentTaskOverrides {
   if (!record(overrides) || Object.keys(overrides).length > 128) return invalidStart()
   for (const [node, override] of Object.entries(overrides)) {
     if (!logicalId(node) || !closed(override, [], ['templateRef', 'parameters']) || Object.keys(override).length === 0) return invalidStart()
@@ -347,7 +352,17 @@ function startWire(value: unknown) {
       typedJson(override.parameters, overrideBytes)
     }
   }
+}
 
+function startWire(value: unknown) {
+  const required = ['definitionKey', 'businessKey', 'commandId', 'correlationId', 'variables']
+  if (!closed(value, required, ['agentTaskOverrides']) || !logicalId(value.definitionKey)
+      || !logicalId(value.commandId) || value.commandId.startsWith('evt-v2-') || !logicalId(value.correlationId)
+      || !opaque(value.businessKey, 255) || boundaryWhitespace.test(value.businessKey) || !record(value.variables)) return invalidStart()
+
+  const hasOverrides = Object.hasOwn(value, 'agentTaskOverrides')
+  const overrides = hasOverrides ? value.agentTaskOverrides : {}
+  validateStartOverrides(overrides)
   const variables = typedJson(value.variables).json
   const overridesJson = typedJson(overrides, overrideBytes, typedDepth + 2).json
   const {definitionKey, businessKey, commandId, correlationId} = value

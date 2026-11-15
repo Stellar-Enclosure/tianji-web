@@ -6,6 +6,9 @@ import {processDraftsApi, type DraftState, type DraftSummaryDTO, type ListProces
   type ProcessDraftPageDTO} from '../api/processDrafts'
 import {isCanonicalTenant} from '../api/client'
 import {isProcessReleaseVersion} from '../api/processReleases'
+import {processAutomationApi, parseStartOverridesJson, parseStartVariablesJson,
+  type AutomationInstanceDTO, type AutomationStartCommand} from '../api/processAutomation'
+import {processStartReceiptsApi} from '../api/processStartReceipts'
 import {gatewayAuth} from '../auth/gatewayAuth'
 import {useAuth} from '../auth/AuthContext'
 
@@ -13,12 +16,20 @@ const PAGE = 'tianji.page.processDefinitions'
 const CREATE = 'tianji.button.processDefinitions.create'
 const COPY = 'tianji.button.processDefinitions.copy'
 const RECOVERY_KEY = 'tianji.process-draft-create.v1'
+const START_RECOVERY_KEY = 'tianji.process-start.v2'
 const CREATE_REJECTIONS: Readonly<Partial<Record<number, string>>> = {
   400: 'TIANJI_INVALID_COMMAND',
   404: 'TIANJI_RESOURCE_NOT_FOUND',
   409: 'TIANJI_DRAFT_SOURCE_UNAVAILABLE',
   413: 'TIANJI_REQUEST_TOO_LARGE',
 }
+const START_REJECTIONS: Readonly<Partial<Record<number, readonly string[]>>> = {
+  400: ['TIANJI_INVALID_COMMAND'],
+  409: ['TIANJI_PROCESS_NOT_ACTIVATED', 'TIANJI_PROCESS_ACTIVATION_CONFLICT'],
+}
+const START_ACTION = 'tianji.button.processDefinitions.start'
+const PROCESS_READ_CODE = 'TIANJI_PROCESS_READ'
+const PROCESS_START_CODE = 'TIANJI_PROCESS_START'
 const STATES: readonly DraftState[] = ['EDITING', 'PUBLISHED', 'DISCARDED']
 const DEFINITION_KEY = /^[A-Za-z_][A-Za-z0-9_.-]{0,127}(?![\s\S])/
 const COMMAND_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}(?![\s\S])/
@@ -40,6 +51,17 @@ type CreateIntent = Readonly<{
   commandId: string
 }>
 type RecoveryState = 'dispatching' | 'checking' | 'unknown'
+type StartPointer = Readonly<{
+  version: 1
+  operation: 'START'
+  actorFingerprint: string
+  tenantId: string
+  commandId: string
+  requestSha256: string
+}>
+type StartState = 'preparing' | 'checking' | 'sending' | 'unknown'
+type StartedInstance = Pick<AutomationInstanceDTO, 'instanceId' | 'releaseVersion' | 'activationRevision'>
+type CopyFromRelease = Readonly<{definitionKey: string; releaseVersion: string}>
 
 function hasExactFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
   const keys = Object.keys(value)
@@ -48,6 +70,29 @@ function hasExactFields(value: Record<string, unknown>, fields: readonly string[
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function decodeStartPointer(value: unknown): StartPointer | null {
+  if (!isRecord(value) || !hasExactFields(value,
+    ['version', 'operation', 'actorFingerprint', 'tenantId', 'commandId', 'requestSha256'])
+      || value.version !== 1 || value.operation !== 'START'
+      || typeof value.actorFingerprint !== 'string' || !/^[a-f0-9]{64}(?![\s\S])/.test(value.actorFingerprint)
+      || typeof value.tenantId !== 'string' || !isCanonicalTenant(value.tenantId)
+      || typeof value.commandId !== 'string'
+      || !/^start-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\s\S])/.test(value.commandId)
+      || typeof value.requestSha256 !== 'string' || !/^[a-f0-9]{64}(?![\s\S])/.test(value.requestSha256)) return null
+  return value as StartPointer
+}
+
+function decodeCopyFrom(value: unknown): CopyFromRelease | null {
+  if (!isRecord(value) || !hasExactFields(value, ['definitionKey', 'releaseVersion'])
+      || typeof value.definitionKey !== 'string' || !DEFINITION_KEY.test(value.definitionKey)
+      || !isProcessReleaseVersion(value.releaseVersion)) return null
+  return {definitionKey: value.definitionKey, releaseVersion: value.releaseVersion}
+}
+
+function isDefiniteStartRejection(failure: unknown): failure is ApiError {
+  return failure instanceof ApiError && START_REJECTIONS[failure.status]?.includes(failure.code) === true
 }
 
 function isTitle(value: string): boolean {
@@ -85,7 +130,7 @@ function isExactRecovery(summary: DraftSummaryDTO, intent: CreateIntent): boolea
     && summary.baseReleaseVersion === intent.baseReleaseVersion
 }
 
-function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate, canCopy}: {
+function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate, canCopy, startEnabled}: {
   tenant: string
   issuer: string
   subject: string
@@ -93,20 +138,36 @@ function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate
   canView: boolean
   canCreate: boolean
   canCopy: boolean
+  startEnabled: boolean
 }) {
   const location = useLocation()
   const navigate = useNavigate()
   const isNew = location.pathname === '/process-definitions/new'
   const isWorkspace = location.pathname === '/process-definitions' || isNew
+  const copyFrom = canCopy && isNew && isRecord(location.state)
+    ? decodeCopyFrom(location.state.copyFrom) : null
   const [fingerprint, setFingerprint] = useState<string>()
   const [storageReady, setStorageReady] = useState(false)
   const [storageError, setStorageError] = useState(false)
   const [recovery, setRecovery] = useState<CreateIntent | null>(null)
   const [recoveryState, setRecoveryState] = useState<RecoveryState>()
   const [recoveryError, setRecoveryError] = useState<string>()
-  const [definitionInput, setDefinitionInput] = useState('')
+  const [definitionInput, setDefinitionInput] = useState(() => copyFrom?.definitionKey ?? '')
   const [title, setTitle] = useState('')
-  const [baseReleaseVersion, setBaseReleaseVersion] = useState('')
+  const [baseReleaseVersion, setBaseReleaseVersion] = useState(() => copyFrom?.releaseVersion ?? '')
+  const [startDefinitionKey, setStartDefinitionKey] = useState('')
+  const [startBusinessKey, setStartBusinessKey] = useState('')
+  const [startCorrelationId, setStartCorrelationId] = useState('')
+  const [startVariablesSource, setStartVariablesSource] = useState('{}')
+  const [startOverridesSource, setStartOverridesSource] = useState('')
+  const [startPointer, setStartPointer] = useState<StartPointer | null>(null)
+  const [startPointerReady, setStartPointerReady] = useState(false)
+  const [startState, setStartState] = useState<StartState>()
+  const [startError, setStartError] = useState<string>()
+  const [started, setStarted] = useState<StartedInstance>()
+  const [pendingStartBody, setPendingStartBody] = useState<AutomationStartCommand>()
+  const [startFormError, setStartFormError] = useState<string>()
+  const copyStateCaptured = useRef(false)
   const [formError, setFormError] = useState<string>()
   const [filters, setFilters] = useState<{definitionKey?: string; state: DraftState}>({state: 'EDITING'})
   const [filterError, setFilterError] = useState<string>()
@@ -121,9 +182,20 @@ function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate
   const listController = useRef<AbortController | null>(null)
   const recoveryController = useRef<AbortController | null>(null)
   const createController = useRef<AbortController | null>(null)
+  const startController = useRef<AbortController | null>(null)
+  const startInFlight = useRef(false)
+  const currentCanStart = useRef(false)
   const sequence = useRef(0)
 
   const isCurrent = useCallback(() => alive.current && gatewayAuth.context.epoch === epoch, [epoch])
+  const isStartScopeCurrent = useCallback(() => isCurrent() && currentCanStart.current, [isCurrent])
+
+  useEffect(() => {
+    if (!copyFrom || copyStateCaptured.current) return
+    copyStateCaptured.current = true
+    navigate(location.pathname, {replace: true, state: null})
+  }, [copyFrom, location.pathname, navigate])
+  const canStart = canView && startEnabled
 
   useLayoutEffect(() => {
     alive.current = true
@@ -133,11 +205,16 @@ function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate
       listController.current?.abort()
       recoveryController.current?.abort()
       createController.current?.abort()
+      startController.current?.abort()
       listController.current = null
       recoveryController.current = null
       createController.current = null
+      startController.current = null
+      startInFlight.current = false
     }
   }, [])
+
+  useLayoutEffect(() => { currentCanStart.current = canStart }, [canStart])
 
   useEffect(() => {
     let active = true
@@ -151,6 +228,172 @@ function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate
     })
     return () => { active = false }
   }, [issuer, subject, isCurrent])
+
+  const removeStartPointer = useCallback((intent: StartPointer) => {
+    try {
+      const stored = decodeStartPointer(JSON.parse(sessionStorage.getItem(START_RECOVERY_KEY) ?? 'null'))
+      if (stored && stored.actorFingerprint === intent.actorFingerprint
+          && stored.tenantId === intent.tenantId && stored.commandId === intent.commandId) {
+        sessionStorage.removeItem(START_RECOVERY_KEY)
+      }
+    } catch {
+      setStorageError(true)
+    }
+  }, [])
+
+  const verifyStartReceipt = useCallback(async (intent: StartPointer) => {
+    if (!isStartScopeCurrent() || !fingerprint || intent.actorFingerprint !== fingerprint || intent.tenantId !== tenant) return
+    setStartState('checking')
+    setStartError(undefined)
+    const request = new AbortController()
+    startController.current?.abort()
+    startController.current = request
+    try {
+      const receipt = await processStartReceiptsApi.get(tenant, {
+        commandId: intent.commandId, requestSha256: intent.requestSha256,
+      }, request.signal)
+      if (!isStartScopeCurrent() || request.signal.aborted) return
+      removeStartPointer(intent)
+      setStartPointer(null)
+      setPendingStartBody(undefined)
+      navigate('/process-instances/' + encodeURIComponent(receipt.instanceId))
+    } catch {
+      if (!isStartScopeCurrent() || request.signal.aborted) return
+      setStartState('unknown')
+      setStartError('服务尚未提供原 START 的 APPLIED 回执。请稍后查证，或在本页重放原请求。')
+    } finally {
+      if (startController.current === request) startController.current = null
+    }
+  }, [fingerprint, isStartScopeCurrent, navigate, removeStartPointer, tenant])
+
+  useEffect(() => {
+    if (!fingerprint) return
+    let active = true
+    void Promise.resolve().then(() => {
+      if (!active || !isCurrent()) return
+      try {
+        const raw = sessionStorage.getItem(START_RECOVERY_KEY)
+        if (!raw) {
+          setStartPointerReady(true)
+          return
+        }
+        const intent = decodeStartPointer(JSON.parse(raw))
+        if (!intent || intent.actorFingerprint !== fingerprint || intent.tenantId !== tenant) {
+          sessionStorage.removeItem(START_RECOVERY_KEY)
+          setStartPointerReady(true)
+          return
+        }
+        setStartPointer(intent)
+        setStartState('unknown')
+        setStartPointerReady(true)
+        if (canStart) void verifyStartReceipt(intent)
+      } catch {
+        setStorageError(true)
+        setStartPointerReady(true)
+      }
+    })
+    return () => { active = false }
+  }, [canStart, fingerprint, isCurrent, tenant, verifyStartReceipt])
+
+  const transmitStart = async (intent: StartPointer, body: AutomationStartCommand, heldInFlightGuard = false): Promise<void> => {
+    if ((!heldInFlightGuard && startInFlight.current) || !isStartScopeCurrent() || !fingerprint
+        || intent.actorFingerprint !== fingerprint || intent.tenantId !== tenant) return
+    startInFlight.current = true
+    setStartState('sending')
+    setStartError(undefined)
+    setPendingStartBody(body)
+    const request = new AbortController()
+    startController.current?.abort()
+    startController.current = request
+    try {
+      const digest = await processAutomationApi.startRequestSha256(body)
+      if (!isStartScopeCurrent() || request.signal.aborted) return
+      if (digest !== intent.requestSha256) {
+        setStartState('unknown')
+        setStartError('原 START 请求摘要与内存请求不一致。仅可查证回执。')
+        return
+      }
+      const result = await processAutomationApi.start(tenant, body, request.signal)
+      if (!isStartScopeCurrent() || request.signal.aborted) return
+      removeStartPointer(intent)
+      setStartPointer(null)
+      setPendingStartBody(undefined)
+      setStartState(undefined)
+      setStarted({instanceId: result.instanceId, releaseVersion: result.releaseVersion,
+        activationRevision: result.activationRevision})
+    } catch (failure) {
+      if (!isStartScopeCurrent() || request.signal.aborted) return
+      if (isDefiniteStartRejection(failure)) {
+        removeStartPointer(intent)
+        setStartPointer(null)
+        setPendingStartBody(undefined)
+        setStartState(undefined)
+        setStartFormError(failure.code === 'TIANJI_PROCESS_NOT_ACTIVATED'
+          ? '此流程定义当前没有生效版本。完成发布和生效后，可提交新的启动请求。'
+          : failure.code === 'TIANJI_PROCESS_ACTIVATION_CONFLICT'
+            ? '启动期间生效版本发生变化。请重新确认当前生效版本后，再提交新的启动请求。'
+            : 'START 请求未被接受。请检查字段后重新提交。')
+      } else {
+        setStartPointer(intent)
+        setStartState('unknown')
+        setStartError('START 结果尚未确认。请使用原命令查证，或重放仍保存在本页的原请求。')
+      }
+    } finally {
+      if (startController.current === request) startController.current = null
+      startInFlight.current = false
+    }
+  }
+
+  const submitStart = async () => {
+    if (!isStartScopeCurrent() || startInFlight.current || startPointer
+        || !startPointerReady || storageError || !fingerprint || !globalThis.crypto?.randomUUID) return
+    startInFlight.current = true
+    setStartState('preparing')
+    setStartFormError(undefined)
+    setStartError(undefined)
+    try {
+      const variables = parseStartVariablesJson(startVariablesSource)
+      const overrides = startOverridesSource.trim() ? parseStartOverridesJson(startOverridesSource) : undefined
+      const command: AutomationStartCommand = {
+        definitionKey: startDefinitionKey,
+        businessKey: startBusinessKey,
+        commandId: 'start-' + globalThis.crypto.randomUUID(),
+        correlationId: startCorrelationId,
+        variables,
+        ...(overrides === undefined ? {} : {agentTaskOverrides: overrides}),
+      }
+      const requestSha256 = await processAutomationApi.startRequestSha256(command)
+      if (!isStartScopeCurrent()) {
+        setStartState(undefined)
+        return
+      }
+      const intent: StartPointer = {
+        version: 1, operation: 'START', actorFingerprint: fingerprint, tenantId: tenant,
+        commandId: command.commandId, requestSha256,
+      }
+      sessionStorage.setItem(START_RECOVERY_KEY, JSON.stringify(intent))
+      if (!isStartScopeCurrent()) {
+        removeStartPointer(intent)
+        setStartState(undefined)
+        return
+      }
+      setStartPointer(intent)
+      await transmitStart(intent, command, true)
+    } catch (failure) {
+      if (!isStartScopeCurrent()) {
+        setStartState(undefined)
+        return
+      }
+      if (failure instanceof DOMException && failure.name === 'SecurityError') setStorageError(true)
+      setStartFormError(failure instanceof Error && failure.message === '流程类型化数据无效'
+        ? '启动变量或节点覆盖必须是符合限制的类型化 JSON。'
+        : failure instanceof SyntaxError ? '启动变量或节点覆盖 JSON 格式无效。'
+          : '请检查启动定义、业务标识及关联标识。')
+      setStartState(undefined)
+    } finally {
+      startInFlight.current = false
+    }
+  }
 
   const removeRecovery = useCallback((commandId: string) => {
     try {
@@ -389,6 +632,69 @@ function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate
         </Button>}
       </Space>} />}
 
+    {copyFrom && isNew && canCopy && <Alert type="info" showIcon
+      message="已选择发布版作为草稿来源"
+      description={`${copyFrom.definitionKey} · ${copyFrom.releaseVersion}。提交后服务器会从此精确发布版创建草稿。`} />}
+
+    {canStart && !isNew && <section aria-labelledby="technical-start-heading" className="surface-card">
+      <Typography.Title level={3} id="technical-start-heading">技术启动</Typography.Title>
+      <Typography.Text type="secondary">
+        输入已知流程定义、业务标识、关联标识和类型化 JSON。服务器选择当前已生效发布版。
+      </Typography.Text>
+      {startPointer && <Alert type={startState === 'unknown' ? 'warning' : 'info'} showIcon
+        message={startState === 'checking' ? '正在查证原 START 回执'
+          : startState === 'sending' ? '正在提交 START'
+            : startState === 'unknown' ? '启动结果尚未确认' : '原 START 已保留待核对'}
+        description={<Space orientation="vertical" size="small">
+          <span>{startError ?? (pendingStartBody
+            ? '原始请求仍在本页内存。请重放同一请求或查证 APPLIED 回执。'
+            : '刷新后不再保留业务正文，只能查证原命令的 APPLIED 回执。')}</span>
+          <Space wrap>
+            <Button disabled={startState === 'checking' || startState === 'sending'}
+              onClick={() => void verifyStartReceipt(startPointer)}>查证原 START 回执</Button>
+            {pendingStartBody && <Button disabled={startState === 'checking' || startState === 'sending'}
+              onClick={() => void transmitStart(startPointer, pendingStartBody)}>重放原 START 请求</Button>}
+          </Space>
+        </Space>} />}
+      {started && !startPointer && <Alert type="success" showIcon
+        message="流程实例已启动"
+        description={<Space orientation="vertical">
+          <span>{started.releaseVersion} · 生效修订 {started.activationRevision}</span>
+          <Link to={'/process-instances/' + encodeURIComponent(started.instanceId)}>打开已启动实例</Link>
+        </Space>} />}
+      {startFormError && <Alert type="error" showIcon message={startFormError} />}
+      {startState === 'preparing' && <Typography.Text role="status" type="secondary">
+        正在计算请求摘要并安全保存原命令指针…
+      </Typography.Text>}
+      <Space orientation="vertical" size="middle" className="full-width">
+        <label htmlFor="start-definition-key">启动定义标识</label>
+        <Input id="start-definition-key" autoComplete="off" maxLength={128} value={startDefinitionKey}
+          disabled={!!startPointer || !startPointerReady || storageError}
+          onChange={event => setStartDefinitionKey(event.target.value)} />
+        <label htmlFor="start-business-key">业务标识</label>
+        <Input id="start-business-key" autoComplete="off" maxLength={255} value={startBusinessKey}
+          disabled={!!startPointer || !startPointerReady || storageError}
+          onChange={event => setStartBusinessKey(event.target.value)} />
+        <label htmlFor="start-correlation-id">关联标识</label>
+        <Input id="start-correlation-id" autoComplete="off" maxLength={128} value={startCorrelationId}
+          disabled={!!startPointer || !startPointerReady || storageError}
+          onChange={event => setStartCorrelationId(event.target.value)} />
+        <label htmlFor="start-variables-json">启动变量 JSON</label>
+        <Input.TextArea id="start-variables-json" aria-label="启动变量 JSON" rows={6}
+          className="process-editor-source" spellCheck={false} value={startVariablesSource}
+          disabled={!!startPointer || !startPointerReady || storageError}
+          onChange={event => setStartVariablesSource(event.target.value)} />
+        <label htmlFor="start-overrides-json">Agent 节点覆盖 JSON（可选）</label>
+        <Input.TextArea id="start-overrides-json" aria-label="Agent 节点覆盖 JSON（可选）" rows={4}
+          className="process-editor-source" spellCheck={false} value={startOverridesSource}
+          disabled={!!startPointer || !startPointerReady || storageError}
+          onChange={event => setStartOverridesSource(event.target.value)} />
+        <Button type="primary" aria-label="技术启动" loading={startState === 'preparing' || startState === 'sending'}
+          disabled={!startPointerReady || storageError || !!startPointer || startState !== undefined}
+          onClick={() => void submitStart()}>技术启动</Button>
+      </Space>
+    </section>}
+
     {isNew ? recovery ? null : <section aria-labelledby="new-draft-heading">
       <Typography.Title level={3} id="new-draft-heading">新建草稿</Typography.Title>
       <div className="surface-card">
@@ -460,6 +766,7 @@ function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate
 
 export default function ProcessDefinitionWorkspacePage() {
   const {status, authorization: current, allows} = useAuth()
+  const location = useLocation()
   if (status !== 'ready' && status !== 'forbidden' || !current || !isCanonicalTenant(current.identity.tenantId)) {
     return <Alert type="warning" showIcon message="当前身份不能访问草稿工作区。" />
   }
@@ -467,7 +774,10 @@ export default function ProcessDefinitionWorkspacePage() {
   const canView = status === 'ready' && allows(PAGE)
   const canCreate = canView && allows(CREATE)
   const canCopy = canView && allows(COPY)
-  const key = JSON.stringify([identity.issuer, identity.subject, identity.tenantId, binding.requestEpoch, canView])
+  const canStart = canView && allows(START_ACTION)
+    && current.snapshot.permissionCodes.includes(PROCESS_READ_CODE)
+    && current.snapshot.permissionCodes.includes(PROCESS_START_CODE)
+  const key = JSON.stringify([identity.issuer, identity.subject, identity.tenantId, binding.requestEpoch, canView, location.pathname])
   return <OwnerDraftWorkspace key={key} tenant={identity.tenantId} issuer={identity.issuer} subject={identity.subject}
-    epoch={binding.requestEpoch} canView={canView} canCreate={canCreate} canCopy={canCopy} />
+    epoch={binding.requestEpoch} canView={canView} canCreate={canCreate} canCopy={canCopy} startEnabled={canStart} />
 }

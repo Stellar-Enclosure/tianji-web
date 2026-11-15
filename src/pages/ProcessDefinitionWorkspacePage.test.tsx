@@ -4,6 +4,8 @@ import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {beforeEach, describe, expect, it, vi} from 'vitest'
 import type {DraftSummaryDTO, ProcessDraftPageDTO} from '../api/processDrafts'
 import {processDraftsApi} from '../api/processDrafts'
+import {processAutomationApi, type AutomationInstanceDTO} from '../api/processAutomation'
+import {processStartReceiptsApi} from '../api/processStartReceipts'
 import {useAuth} from '../auth/AuthContext'
 import {authorization} from '../test/fixtures'
 import ProcessDefinitionWorkspacePage from './ProcessDefinitionWorkspacePage'
@@ -13,10 +15,17 @@ vi.mock('../api/processDrafts', async original => {
   const actual = await original<typeof import('../api/processDrafts')>()
   return {...actual, processDraftsApi: {list: vi.fn(), create: vi.fn()}}
 })
+vi.mock('../api/processAutomation', async original => {
+  const actual = await original<typeof import('../api/processAutomation')>()
+  return {...actual, processAutomationApi: {...actual.processAutomationApi, start: vi.fn(), startRequestSha256: vi.fn()}}
+})
+vi.mock('../api/processStartReceipts', () => ({processStartReceiptsApi: {get: vi.fn()}}))
 
 const PAGE = 'tianji.page.processDefinitions'
 const CREATE = 'tianji.button.processDefinitions.create'
 const COPY = 'tianji.button.processDefinitions.copy'
+const START = 'tianji.button.processDefinitions.start'
+const PROCESS_READ = 'tianji.page.processCorrelations'
 const TIME = '2026-11-14T10:30:00.123456Z'
 const summary = (draftId: string, overrides: Partial<DraftSummaryDTO> = {}): DraftSummaryDTO => ({
   draftId, definitionKey: 'orderFlow', title: 'Order flow', baseReleaseVersion: null,
@@ -28,9 +37,14 @@ const page = (items: readonly DraftSummaryDTO[], nextCursor: string | null = nul
   ({observedAt: TIME, items, nextCursor})
 const list = vi.mocked(processDraftsApi.list)
 const create = vi.mocked(processDraftsApi.create)
+const start = vi.mocked(processAutomationApi.start)
+const startDigest = vi.mocked(processAutomationApi.startRequestSha256)
+const getStartReceipt = vi.mocked(processStartReceiptsApi.get)
 
-const auth = (tenant = '20', granted = [PAGE, CREATE, COPY], subject = 'subject-' + tenant): ReturnType<typeof useAuth> => {
-  const frame = authorization(tenant, ['TIANJI_PROCESS_RELEASE_PUBLISH', 'TIANJI_PROCESS_RELEASE_READ'])
+const auth = (tenant = '20', granted = [PAGE, CREATE, COPY, START, PROCESS_READ], subject = 'subject-' + tenant,
+              permissions = ['TIANJI_PROCESS_RELEASE_PUBLISH', 'TIANJI_PROCESS_RELEASE_READ',
+                'TIANJI_PROCESS_READ', 'TIANJI_PROCESS_START']): ReturnType<typeof useAuth> => {
+  const frame = authorization(tenant, permissions)
   return {
     status: 'ready',
     authorization: {...frame, identity: {...frame.identity, subject}},
@@ -42,13 +56,18 @@ let current = auth()
 
 function RouteState() {
   const location = useLocation()
-  return <output aria-label="当前地址">{location.pathname + location.search}</output>
+  return <>
+    <output aria-label="当前地址">{location.pathname + location.search}</output>
+    <output aria-label="当前路由状态">{JSON.stringify(location.state)}</output>
+  </>
 }
 
-function Harness({initialEntry = '/process-definitions'}: {initialEntry?: string}) {
-  return <MemoryRouter initialEntries={[initialEntry]}>
+function Harness({initialEntry = '/process-definitions', initialState}: {initialEntry?: string; initialState?: unknown}) {
+  const entry = initialState === undefined ? initialEntry : {pathname: initialEntry, state: initialState}
+  return <MemoryRouter initialEntries={[entry]}>
     <Routes>
       <Route path="/process-definitions/*" element={<ProcessDefinitionWorkspacePage />} />
+      <Route path="/process-instances/:instanceId" element={<output aria-label="启动后实例地址" />} />
     </Routes>
     <RouteState />
   </MemoryRouter>
@@ -63,6 +82,16 @@ describe('Process definition owner workspace', () => {
     current = auth()
     vi.mocked(useAuth).mockImplementation(() => current)
     list.mockResolvedValue(page([]))
+    start.mockResolvedValue({
+      instanceId: 'pi-started', definitionKey: 'orderFlow', releaseVersion: 'auto-8', activationRevision: 4,
+      profile: 'AUTOMATION_V2', businessKey: 'order-19', correlationId: 'corr-order-19', state: 'ACTIVE',
+      version: '1'.repeat(64), configurationSha256: '2'.repeat(64), submittedAt: TIME, finishedAt: null,
+      output: null, availableActions: ['CANCEL'], graph: {
+        definitionKey: 'orderFlow', nodes: [{id: 'start', kind: 'START', name: 'Start'}], edges: [],
+      },
+    } as AutomationInstanceDTO)
+    startDigest.mockResolvedValue('f'.repeat(64))
+    getStartReceipt.mockRejectedValue(new ApiError('Missing receipt', 404, 'TIANJI_RESOURCE_NOT_FOUND'))
     create.mockImplementation(async (_tenant, definitionKey, body) => summary('pd-server-1', {
       definitionKey, title: body.title, baseReleaseVersion: body.baseReleaseVersion ?? null,
     }))
@@ -74,6 +103,16 @@ describe('Process definition owner workspace', () => {
     expect(list).toHaveBeenCalledWith('20', {state: 'EDITING', limit: 20}, expect.any(AbortSignal))
     expect(screen.getByRole('button', {name: '新建草稿'})).toBeInTheDocument()
     expect(screen.getByRole('button', {name: '筛选'})).toBeInTheDocument()
+  })
+
+  it('keeps router hooks stable when authentication changes from loading to ready', async () => {
+    current = {...auth(), status: 'loading', authorization: undefined}
+    const rendered = render(<Harness />)
+    expect(screen.getByText('当前身份不能访问草稿工作区。')).toBeInTheDocument()
+
+    current = auth()
+    rendered.rerender(<Harness />)
+    expect(await screen.findByText('还没有草稿')).toBeInTheDocument()
   })
 
   it('lists server drafts and paginates by the returned cursor under the same filters', async () => {
@@ -181,7 +220,8 @@ describe('Process definition owner workspace', () => {
 
   it('keeps the prior draft list readable while an unknown CREATE blocks another write', async () => {
     create.mockRejectedValueOnce(new TypeError('Failed to fetch'))
-    list.mockResolvedValueOnce(page([])).mockResolvedValueOnce(page([summary('pd-existing')]))
+    list.mockImplementation(async (_tenant, query) => query?.creationCommandId
+      ? page([]) : page([summary('pd-existing')]))
     render(<Harness initialEntry="/process-definitions/new" />)
     await screen.findByRole('heading', {name: '新建草稿'})
     await waitFor(() => expect(screen.getByRole('button', {name: '创建空稿'})).toBeEnabled())
@@ -317,5 +357,215 @@ describe('Process definition owner workspace', () => {
     expect(await screen.findByText('当前身份不能访问草稿工作区。')).toBeInTheDocument()
     await waitFor(() => expect(sessionStorage.getItem('tianji.process-draft-create.v1')).toBeNull())
     expect(list).not.toHaveBeenCalled()
+  })
+
+  it('starts the selected definition with raw typed values and displays the server-selected release', async () => {
+    start.mockImplementationOnce(async (_tenant, command) => {
+      const pointer = JSON.parse(sessionStorage.getItem('tianji.process-start.v2')!)
+      expect(pointer).toMatchObject({operation: 'START', commandId: command.commandId, requestSha256: 'f'.repeat(64)})
+      expect(pointer).not.toHaveProperty('body')
+      return {
+        instanceId: 'pi-started', definitionKey: 'orderFlow', releaseVersion: 'auto-8', activationRevision: 4,
+        profile: 'AUTOMATION_V2', businessKey: 'order-19', correlationId: 'corr-order-19', state: 'ACTIVE',
+        version: '1'.repeat(64), configurationSha256: '2'.repeat(64), submittedAt: TIME, finishedAt: null,
+        output: null, availableActions: ['CANCEL'], graph: {
+          definitionKey: 'orderFlow', nodes: [{id: 'start', kind: 'START', name: 'Start'}], edges: [],
+        },
+      } as AutomationInstanceDTO
+    })
+    render(<Harness />)
+    await screen.findByText('还没有草稿')
+    await waitFor(() => expect(screen.getByRole('button', {name: '技术启动'})).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('启动定义标识'), {target: {value: 'orderFlow'}})
+    fireEvent.change(screen.getByLabelText('业务标识'), {target: {value: 'order-19'}})
+    fireEvent.change(screen.getByLabelText('关联标识'), {target: {value: 'corr-order-19'}})
+    fireEvent.change(screen.getByLabelText('启动变量 JSON'), {target: {value: '{"amount":"1.00","count":2}'}})
+    fireEvent.change(screen.getByLabelText('Agent 节点覆盖 JSON（可选）'), {target: {value:
+      '{"agentNode":{"templateRef":{"key":"template","version":1,"contentSha256":"' + 'a'.repeat(64)
+        + '"},"parameters":{"enabled":true}}}'}})
+    fireEvent.click(screen.getByRole('button', {name: '技术启动'}))
+
+    await waitFor(() => expect(start).toHaveBeenCalledOnce())
+    const [tenant, command, signal] = start.mock.calls[0]
+    expect(tenant).toBe('20')
+    expect(command).toMatchObject({
+      definitionKey: 'orderFlow', businessKey: 'order-19', correlationId: 'corr-order-19',
+      variables: {amount: '1.00', count: 2},
+      agentTaskOverrides: {agentNode: {
+        templateRef: {key: 'template', version: 1, contentSha256: 'a'.repeat(64)}, parameters: {enabled: true},
+      }},
+    })
+    expect(Object.keys(command)).toEqual(['definitionKey', 'businessKey', 'commandId', 'correlationId', 'variables', 'agentTaskOverrides'])
+    expect(command.commandId).toMatch(/^start-/)
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(startDigest).toHaveBeenCalledWith(command)
+    expect(sessionStorage.getItem('tianji.process-start.v2')).toBeNull()
+    expect(await screen.findByText(/auto-8.*修订 4/)).toBeInTheDocument()
+    expect(screen.getByRole('link', {name: '打开已启动实例'})).toHaveAttribute('href', '/process-instances/pi-started')
+  })
+
+  it('preserves the original START body while mounted and never replaces an unknown write with another key', async () => {
+    start.mockRejectedValueOnce(new TypeError('response lost'))
+    render(<Harness />)
+    await screen.findByText('还没有草稿')
+    await waitFor(() => expect(screen.getByRole('button', {name: '技术启动'})).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('启动定义标识'), {target: {value: 'orderFlow'}})
+    fireEvent.change(screen.getByLabelText('业务标识'), {target: {value: 'order-19'}})
+    fireEvent.change(screen.getByLabelText('关联标识'), {target: {value: 'corr-order-19'}})
+    fireEvent.change(screen.getByLabelText('启动变量 JSON'), {target: {value: '{"count":2}'}})
+    fireEvent.click(screen.getByRole('button', {name: '技术启动'}))
+    expect(await screen.findByText('启动结果尚未确认')).toBeInTheDocument()
+    const original = start.mock.calls[0]
+    fireEvent.change(screen.getByLabelText('启动变量 JSON'), {target: {value: '{"count":3}'}})
+    expect(screen.getByRole('button', {name: '技术启动'})).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', {name: '重放原 START 请求'}))
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(2))
+    expect(start.mock.calls[1]?.[1]).toEqual(original?.[1])
+    expect(startDigest.mock.calls[0]?.[0]).toEqual(startDigest.mock.calls[1]?.[0])
+  })
+
+  it('fences rapid START submissions while hashing the captured request', async () => {
+    let completeDigest!: (value: string) => void
+    startDigest.mockReturnValueOnce(new Promise(resolve => { completeDigest = resolve }))
+    render(<Harness />)
+    await screen.findByText('还没有草稿')
+    await waitFor(() => expect(screen.getByRole('button', {name: '技术启动'})).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('启动定义标识'), {target: {value: 'orderFlow'}})
+    fireEvent.change(screen.getByLabelText('业务标识'), {target: {value: 'order-19'}})
+    fireEvent.change(screen.getByLabelText('关联标识'), {target: {value: 'corr-order-19'}})
+    fireEvent.click(screen.getByRole('button', {name: '技术启动'}))
+    expect(screen.getByRole('button', {name: '技术启动'})).toBeDisabled()
+    expect(screen.getByText(/正在计算请求摘要/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: '技术启动'}))
+    expect(startDigest).toHaveBeenCalledOnce()
+    expect(start).not.toHaveBeenCalled()
+    await act(async () => { completeDigest('f'.repeat(64)) })
+    await waitFor(() => expect(start).toHaveBeenCalledOnce())
+  })
+
+  it('drops a pending START digest when the verified tenant changes before dispatch', async () => {
+    let finishDigest!: (value: string) => void
+    startDigest.mockReturnValueOnce(new Promise(resolve => { finishDigest = resolve }))
+    const rendered = render(<Harness />)
+    await screen.findByText('还没有草稿')
+    await waitFor(() => expect(screen.getByRole('button', {name: '技术启动'})).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('启动定义标识'), {target: {value: 'orderFlow'}})
+    fireEvent.change(screen.getByLabelText('业务标识'), {target: {value: 'order-19'}})
+    fireEvent.change(screen.getByLabelText('关联标识'), {target: {value: 'corr-order-19'}})
+    fireEvent.click(screen.getByRole('button', {name: '技术启动'}))
+    await waitFor(() => expect(startDigest).toHaveBeenCalledOnce())
+
+    current = auth('21')
+    rendered.rerender(<Harness />)
+    await act(async () => { finishDigest('f'.repeat(64)) })
+    expect(start).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('tianji.process-start.v2')).toBeNull()
+  })
+
+  it('drops a pending START digest when the authenticated subject changes', async () => {
+    let finishDigest!: (value: string) => void
+    startDigest.mockReturnValueOnce(new Promise(resolve => { finishDigest = resolve }))
+    const rendered = render(<Harness />)
+    await screen.findByText('还没有草稿')
+    await waitFor(() => expect(screen.getByRole('button', {name: '技术启动'})).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('启动定义标识'), {target: {value: 'orderFlow'}})
+    fireEvent.change(screen.getByLabelText('业务标识'), {target: {value: 'order-19'}})
+    fireEvent.change(screen.getByLabelText('关联标识'), {target: {value: 'corr-order-19'}})
+    fireEvent.click(screen.getByRole('button', {name: '技术启动'}))
+    await waitFor(() => expect(startDigest).toHaveBeenCalledOnce())
+
+    current = auth('20', undefined, 'different-subject')
+    rendered.rerender(<Harness />)
+    await act(async () => { finishDigest('f'.repeat(64)) })
+    expect(start).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('tianji.process-start.v2')).toBeNull()
+  })
+
+  it('keeps START unknown on a missing receipt, then navigates only for APPLIED', async () => {
+    getStartReceipt.mockRejectedValueOnce(new ApiError('missing', 404, 'TIANJI_RESOURCE_NOT_FOUND'))
+      .mockResolvedValueOnce({instanceId: 'pi-recovered', status: 'APPLIED', recordedAt: TIME})
+    const identity = authorization('20', ['TIANJI_PROCESS_RELEASE_PUBLISH', 'TIANJI_PROCESS_READ', 'TIANJI_PROCESS_START']).identity
+    const payload = new TextEncoder().encode(JSON.stringify([
+      'TIANJI_PROCESS_DRAFT_OWNER_V1', identity.issuer, identity.subject,
+    ]))
+    const digest = await crypto.subtle.digest('SHA-256', payload)
+    const actorFingerprint = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')
+    sessionStorage.setItem('tianji.process-start.v2', JSON.stringify({
+      version: 1, operation: 'START', actorFingerprint, tenantId: '20',
+      commandId: 'start-01234567-89ab-4cde-8fab-0123456789ab', requestSha256: 'b'.repeat(64),
+    }))
+    render(<Harness />)
+    expect(await screen.findByText('启动结果尚未确认')).toBeInTheDocument()
+    expect(start).not.toHaveBeenCalled()
+    expect(getStartReceipt).toHaveBeenCalledWith('20', {
+      commandId: 'start-01234567-89ab-4cde-8fab-0123456789ab', requestSha256: 'b'.repeat(64),
+    }, expect.any(AbortSignal))
+    expect(screen.getByRole('button', {name: '查证原 START 回执'})).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', {name: '查证原 START 回执'}))
+    await waitFor(() => expect(getStartReceipt).toHaveBeenCalledTimes(2))
+    expect(await screen.findByLabelText('当前地址')).toHaveTextContent('/process-instances/pi-recovered')
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['missing repeated member', '{"count":1,"count":2}'],
+    ['fractional number', '{"count":1.0}'],
+    ['noncanonical large integer', '{"count":1000000000000000}'],
+  ])('rejects raw START JSON with %s before writing', async (_case, source) => {
+    render(<Harness />)
+    await waitFor(() => expect(screen.getByRole('button', {name: '技术启动'})).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('启动定义标识'), {target: {value: 'orderFlow'}})
+    fireEvent.change(screen.getByLabelText('业务标识'), {target: {value: 'order-19'}})
+    fireEvent.change(screen.getByLabelText('关联标识'), {target: {value: 'corr-order-19'}})
+    fireEvent.change(screen.getByLabelText('启动变量 JSON'), {target: {value: source}})
+    fireEvent.click(screen.getByRole('button', {name: '技术启动'}))
+    expect(await screen.findByText('启动变量或节点覆盖必须是符合限制的类型化 JSON。')).toBeInTheDocument()
+    expect(start).not.toHaveBeenCalled()
+    expect(startDigest).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['TIANJI_PROCESS_NOT_ACTIVATED', '此流程定义当前没有生效版本。'],
+    ['TIANJI_PROCESS_ACTIVATION_CONFLICT', '启动期间生效版本发生变化。'],
+  ] as const)('clears a definitive %s outcome and requires a deliberate new submission', async (code, message) => {
+    start.mockRejectedValueOnce(new ApiError('START rejected', 409, code))
+    render(<Harness />)
+    await screen.findByText('还没有草稿')
+    await waitFor(() => expect(screen.getByRole('button', {name: '技术启动'})).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('启动定义标识'), {target: {value: 'orderFlow'}})
+    fireEvent.change(screen.getByLabelText('业务标识'), {target: {value: 'order-19'}})
+    fireEvent.change(screen.getByLabelText('关联标识'), {target: {value: 'corr-order-19'}})
+    fireEvent.click(screen.getByRole('button', {name: '技术启动'}))
+
+    expect(await screen.findByText(new RegExp(message))).toBeInTheDocument()
+    expect(sessionStorage.getItem('tianji.process-start.v2')).toBeNull()
+    expect(start).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', {name: '技术启动'})).toBeEnabled()
+  })
+
+  it('requires both PROCESS_READ and PROCESS_START, including the exact action resource', async () => {
+    current = auth('20', [PAGE, START], 'subject-20', [
+      'TIANJI_PROCESS_RELEASE_PUBLISH', 'TIANJI_PROCESS_START',
+    ])
+    const first = render(<Harness />)
+    expect(screen.queryByRole('button', {name: '技术启动'})).not.toBeInTheDocument()
+    first.unmount()
+
+    current = auth('20', [PAGE, START], 'subject-20', [
+      'TIANJI_PROCESS_RELEASE_PUBLISH', 'TIANJI_PROCESS_READ',
+    ])
+    render(<Harness />)
+    expect(screen.queryByRole('button', {name: '技术启动'})).not.toBeInTheDocument()
+  })
+
+  it('prefills a protected release copy handoff without starting or creating a draft', async () => {
+    render(<Harness initialEntry="/process-definitions/new"
+      initialState={{copyFrom: {definitionKey: 'orderFlow', releaseVersion: 'auto-9'}}} />)
+    expect(await screen.findByRole('heading', {name: '新建草稿'})).toBeInTheDocument()
+    expect(screen.getByLabelText('流程定义标识')).toHaveValue('orderFlow')
+    expect(screen.getByLabelText('复制自发布版本（可选）')).toHaveValue('auto-9')
+    await waitFor(() => expect(screen.getByLabelText('当前路由状态')).toHaveTextContent('null'))
+    expect(start).not.toHaveBeenCalled()
+    expect(create).not.toHaveBeenCalled()
   })
 })

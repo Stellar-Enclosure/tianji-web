@@ -2,6 +2,8 @@ import {act, fireEvent, render, screen, waitFor, within} from '@testing-library/
 import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {beforeEach, describe, expect, it, vi} from 'vitest'
 import {processReleasesApi, type ProcessRelease} from '../api/processReleases'
+import {processActivationsApi, type AutomationReleaseDTO} from '../api/processActivations'
+import {MemoryRouter, Route, Routes, useLocation} from 'react-router-dom'
 import {useAuth} from '../auth/AuthContext'
 import {authorization} from '../test/fixtures'
 import DefinitionReleasePage from './DefinitionReleasePage'
@@ -11,24 +13,80 @@ vi.mock('../api/processReleases', async () => {
   const actual = await vi.importActual<typeof import('../api/processReleases')>('../api/processReleases')
   return {...actual, processReleasesApi: {get: vi.fn()}}
 })
+vi.mock('../api/processActivations', async () => {
+  const actual = await vi.importActual<typeof import('../api/processActivations')>('../api/processActivations')
+  return {...actual, processActivationsApi: {...actual.processActivationsApi, getRelease: vi.fn(), list: vi.fn()}}
+})
+vi.mock('./ProcessActivationPanel', () => ({
+  ProcessActivationPanel: (props: {definitionKey: string; releaseVersion: string}) =>
+    <section aria-label="生效状态">{props.definitionKey}@{props.releaseVersion}</section>,
+}))
 
 const PAGE = 'tianji.page.processReleases'
+const COPY = 'tianji.button.processDefinitions.copy'
 const CREATED = '2026-11-05T10:00:00.123456Z'
 const RELEASE_READ = 'TIANJI_PROCESS_RELEASE_READ'
-const auth = (tenant = '20', allowed = true, epoch?: number): ReturnType<typeof useAuth> => {
+const auth = (tenant = '20', allowed = true, epoch?: number, copy = false): ReturnType<typeof useAuth> => {
   const frame = authorization(tenant, [RELEASE_READ])
   return {status: 'ready', authorization: {...frame, binding: {...frame.binding, requestEpoch: epoch ?? frame.binding.requestEpoch}},
-    allows: resource => resource === PAGE && allowed, login: () => {}, logout: async () => {}, retry: async () => {}}
+    allows: resource => resource === PAGE && allowed || resource === COPY && copy,
+    login: () => {}, logout: async () => {}, retry: async () => {}}
 }
 const release = (releaseVersion: string, key = 'expenseModel'): ProcessRelease =>
   ({releaseVersion, manifestSha256: 'a'.repeat(64), createdAt: CREATED, models: [
     {type: 'BPMN', definitionKey: key, contentSha256: 'b'.repeat(64), inputs: {amount: 'INTEGER'}},
     {type: 'CMMN', definitionKey: 'caseModel', contentSha256: 'c'.repeat(64), inputs: {}},
   ]})
+const v2Release = (releaseVersion: string): AutomationReleaseDTO => ({
+  releaseVersion,
+  sourceManifestSha256: '1'.repeat(64),
+  compiledManifestSha256: '2'.repeat(64),
+  dependencyManifestSha256: '3'.repeat(64),
+  compilerVersion: 'automation-bpmn-2',
+  sourceDraftId: 'pd-30',
+  sourceDraftRevision: 7,
+  graph: {
+    definitionKey: 'expenseFlow',
+    nodes: [{id: 'start', kind: 'START', name: '<script>alert(1)</script>'}, {id: 'end', kind: 'END', name: '结束'}],
+    edges: [{id: 'to-end', source: 'start', target: 'end', label: null}],
+  },
+  artifact: {
+    profile: 'AUTOMATION_V2',
+    models: [{type: 'BPMN', definitionKey: 'expenseFlow', xml: '<definitions><script>text only</script></definitions>'}],
+    inputSchema: {type: 'object', properties: {amount: {type: 'integer'}}, required: ['amount'], additionalProperties: false},
+    outputSchema: {type: 'object', properties: {}, required: [], additionalProperties: false},
+    nodeBindings: [],
+    eventRoutes: [],
+  },
+})
 let current = auth()
 const edit = (value: string) => fireEvent.change(screen.getByLabelText('发布版本'), {target: {value}})
 const compare = (value: string) => fireEvent.change(screen.getByLabelText('对比版本（可选）'), {target: {value}})
 const submit = () => fireEvent.click(screen.getByRole('button', {name: '查询发布'}))
+const selectV2 = () => {
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: '发布格式'}))
+  fireEvent.click(screen.getByText('流程 V2'))
+}
+const selectV1 = () => {
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: '发布格式'}))
+  fireEvent.click(screen.getByText('传统发布（V1）'))
+}
+const enterRelease = (version: string) => edit(version)
+
+function RouteProbe() {
+  const location = useLocation()
+  const copyFrom = (location.state as {copyFrom?: {definitionKey: string; releaseVersion: string}} | null)?.copyFrom
+  return <output aria-label="复制来源">{copyFrom ? copyFrom.definitionKey + '@' + copyFrom.releaseVersion : '无'}</output>
+}
+
+function V2Harness() {
+  return <MemoryRouter initialEntries={['/operations/process-releases']}>
+    <Routes>
+      <Route path="/operations/process-releases" element={<DefinitionReleasePage />} />
+    </Routes>
+    <RouteProbe />
+  </MemoryRouter>
+}
 
 describe('Process release metadata page', () => {
   beforeEach(() => {
@@ -36,6 +94,10 @@ describe('Process release metadata page', () => {
     current = auth()
     vi.mocked(useAuth).mockImplementation(() => current)
     vi.mocked(processReleasesApi.get).mockImplementation(async (_, version) => release(version))
+    vi.mocked(processActivationsApi.getRelease).mockImplementation(async (_, version) => v2Release(version))
+    vi.mocked(processActivationsApi.list).mockResolvedValue({
+      definitionKey: 'expenseFlow', observedAt: CREATED, current: null, items: [], nextCursor: null,
+    })
   })
 
   it('renders an explicit release lookup', () => {
@@ -293,5 +355,80 @@ describe('Process release metadata page', () => {
     expect(screen.queryByText('oldModel')).not.toBeInTheDocument()
     if (allowed) expect(screen.getByLabelText('发布版本')).toHaveValue('')
     else expect(screen.getByText('当前身份不能访问此页面。')).toBeInTheDocument()
+  })
+
+  it('reads a known V2 release explicitly and renders the verified source as plain text', async () => {
+    vi.mocked(processActivationsApi.getRelease).mockResolvedValueOnce(v2Release('auto-7'))
+    render(<V2Harness />)
+    selectV2()
+    enterRelease('auto-7')
+    fireEvent.click(screen.getByRole('button', {name: '查询 V2 发布'}))
+
+    expect(await screen.findByText('expenseFlow@auto-7')).toBeInTheDocument()
+    expect(processActivationsApi.getRelease).toHaveBeenCalledExactlyOnceWith('20', 'auto-7', expect.any(AbortSignal))
+    expect(processReleasesApi.get).not.toHaveBeenCalled()
+    expect(screen.getByText('来源草稿修订：7')).toBeInTheDocument()
+    expect(screen.getByText('1'.repeat(64))).toBeInTheDocument()
+    expect(screen.getByText('2'.repeat(64))).toBeInTheDocument()
+    expect(screen.getByText('3'.repeat(64))).toBeInTheDocument()
+    expect(screen.getByText('<script>alert(1)</script>')).toBeInTheDocument()
+    expect(screen.queryByRole('link', {name: '复制为草稿'})).not.toBeInTheDocument()
+  })
+
+  it('offers an exact-source copy only with the independent copy permission', async () => {
+    current = auth('20', true, undefined, true)
+    vi.mocked(useAuth).mockImplementation(() => current)
+    vi.mocked(processActivationsApi.getRelease).mockResolvedValueOnce(v2Release('auto-7'))
+    render(<V2Harness />)
+    selectV2()
+    enterRelease('auto-7')
+    fireEvent.click(screen.getByRole('button', {name: '查询 V2 发布'}))
+
+    const copy = await screen.findByRole('link', {name: '复制为草稿'})
+    expect(copy).toHaveAttribute('href', '/process-definitions/new')
+    fireEvent.click(copy)
+    expect(screen.getByLabelText('复制来源')).toHaveTextContent('expenseFlow@auto-7')
+    expect(processActivationsApi.getRelease).toHaveBeenCalledExactlyOnceWith('20', 'auto-7', expect.any(AbortSignal))
+  })
+
+  it('keeps V2 lookup failures isolated and does not fall back to the V1 reader', async () => {
+    vi.mocked(processActivationsApi.getRelease).mockRejectedValueOnce(
+      new ApiError('private not-found detail', 404, 'TIANJI_RESOURCE_NOT_FOUND'),
+    )
+    render(<V2Harness />)
+    selectV2()
+    enterRelease('auto-404')
+    fireEvent.click(screen.getByRole('button', {name: '查询 V2 发布'}))
+
+    expect(await screen.findByText('当前无法读取该流程发布版本。')).toBeInTheDocument()
+    expect(processReleasesApi.get).not.toHaveBeenCalled()
+    expect(screen.queryByText('private not-found detail')).not.toBeInTheDocument()
+    expect(screen.queryByText('expenseModel')).not.toBeInTheDocument()
+  })
+
+  it('aborts the V2 source read when its requested version changes', async () => {
+    let complete!: (value: AutomationReleaseDTO) => void
+    vi.mocked(processActivationsApi.getRelease).mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    render(<V2Harness />)
+    selectV2()
+    enterRelease('auto-old')
+    fireEvent.click(screen.getByRole('button', {name: '查询 V2 发布'}))
+    expect(await screen.findByText('正在查询发布元数据')).toBeInTheDocument()
+    const signal = vi.mocked(processActivationsApi.getRelease).mock.calls[0][2]!
+    enterRelease('auto-new')
+    expect(signal.aborted).toBe(true)
+    await act(async () => { complete(v2Release('auto-old')) })
+    expect(screen.queryByText('expenseFlow@auto-old')).not.toBeInTheDocument()
+    expect(processReleasesApi.get).not.toHaveBeenCalled()
+  })
+
+  it('clears a V1 comparison when switching formats so a later V1 lookup stays singular', () => {
+    render(<DefinitionReleasePage />)
+    compare('release-older')
+    selectV2()
+    selectV1()
+    expect(screen.getByLabelText('对比版本（可选）')).toHaveValue('')
+    expect(processReleasesApi.get).not.toHaveBeenCalled()
+    expect(processActivationsApi.getRelease).not.toHaveBeenCalled()
   })
 })
