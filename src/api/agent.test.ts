@@ -18,12 +18,10 @@ const boundCursor = 'v1.YW5jaG9y'
 describe('Agent JSON client', () => {
   beforeEach(() => {
     gatewayAuth.context.invalidate()
-    vi.spyOn(gatewayAuth, 'csrf').mockResolvedValue({headerName: 'X-CSRF-TOKEN', token: 'test-csrf',
-      expiresAt: new Date(Date.now() + 60_000).toISOString()})
   })
   afterEach(() => { gatewayAuth.context.invalidate(); setAuthFailureHandler(() => {}); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-  it('sends an authorized cancellation with the current tenant and CSRF header', async () => {
+  it('sends an authorized cancellation with the current tenant and Resource Bearer', async () => {
     const result = {runId: 'run-1', accepted: true, status: 'CANCELLED', revision: 3}
     const fetcher = vi.fn().mockResolvedValue(json(result))
     vi.stubGlobal('fetch', fetcher)
@@ -32,9 +30,9 @@ describe('Agent JSON client', () => {
     const [url, request] = fetcher.mock.calls[0] as [string, RequestInit]
     expect(new URL(url, 'https://example.test').pathname).toMatch(/\/agent-runs\/run-1\/cancel$/)
     expect(request.method).toBe('POST')
-    expect(request.credentials).toBe('include')
-    expect(new Headers(request.headers).get('Authorization')).toBeNull()
-    expect(new Headers(request.headers).get('X-CSRF-TOKEN')).toBe('test-csrf')
+    expect(request.credentials).toBe('omit')
+    expect(new Headers(request.headers).get('Authorization')).toBe('Bearer tianji-resource-token')
+    expect(new Headers(request.headers).get('X-CSRF-TOKEN')).toBeNull()
     expect(new Headers(request.headers).get('X-Egon-Tianji-Tenant')).toBe('20')
     expect(JSON.parse(String(request.body))).toEqual(command)
   })
@@ -66,16 +64,15 @@ describe('Agent JSON client', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
     const [url, request] = fetcher.mock.calls[0] as [string, RequestInit]
     const path = new URL(url, 'https://example.test')
-    const prefix = new URL(gatewayAuth.applicationBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
+    const prefix = new URL(gatewayAuth.authority('20').apiBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
     expect(path.pathname).toBe(prefix + '/api/tianji/v1/agent-runs/run-1/result')
     expect(path.search).toBe('')
     expect(request.method ?? 'GET').toBe('GET')
     expect(request.body).toBeUndefined()
-    expect(request.credentials).toBe('include')
+    expect(request.credentials).toBe('omit')
     expect(new Headers(request.headers).get('X-Egon-Tianji-Tenant')).toBe('20')
-    expect(request.signal?.aborted).toBe(false)
-    controller.abort()
     expect(request.signal?.aborted).toBe(true)
+    expect(controller.signal.aborted).toBe(false)
   })
 
   it('keeps output available when optional usage is missing, null or malformed', async () => {
@@ -133,18 +130,18 @@ describe('Agent JSON client', () => {
     await expect(agentApi.list('20', 'legacy-token', controller.signal)).resolves.toEqual({items: [run()], nextCursor: 'legacy-token'})
     expect(fetcher).toHaveBeenCalledTimes(2)
     const urls = fetcher.mock.calls.map(([url]) => new URL(String(url), 'https://example.test'))
-    const prefix = new URL(gatewayAuth.applicationBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
+    const prefix = new URL(gatewayAuth.authority('20').apiBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
     expect(urls[0].pathname).toBe(prefix + '/api/tianji/v1/agent-runs')
     expect(urls[1].pathname).toBe(urls[0].pathname)
     expect(urls[0].search).toBe('?correlationId=Expense%3A1&fromInclusive=2026-11-05T10%3A00%3A00.000001Z'
       + '&toExclusive=2026-11-05T10%3A20%3A00.000002Z&cursor=v1.YW5jaG9y')
     expect(urls[1].search).toBe('?limit=20&cursor=legacy-token')
     const [, request] = fetcher.mock.calls[0]
-    expect(request).toMatchObject({method: 'GET', credentials: 'include', cache: 'no-store'})
+    expect(request).toMatchObject({method: 'GET', credentials: 'omit', cache: 'no-store'})
     expect(request?.body).toBeUndefined()
     const headers = new Headers(request?.headers)
     expect(headers.get('X-Egon-Tianji-Tenant')).toBe('20')
-    expect(headers.get('Authorization')).toBeNull()
+    expect(headers.get('Authorization')).toBe('Bearer tianji-resource-token')
     expect(headers.get('X-CSRF-TOKEN')).toBeNull()
     controller.abort()
     expect(request?.signal?.aborted).toBe(true)

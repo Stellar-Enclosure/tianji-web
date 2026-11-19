@@ -30,13 +30,13 @@ describe('Process owner migration preflight client', () => {
     const controller = new AbortController()
     await expect(processMigrationPreflightApi.get('20', {...target, instanceId}, controller.signal))
       .resolves.toEqual({...report, instanceId})
-    const prefix = new URL(gatewayAuth.applicationBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
+    const prefix = new URL(gatewayAuth.authority('20').apiBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
     const [url, request] = fetcher.mock.calls[0]
     const uri = new URL(String(url), 'https://example.test')
     expect(uri.pathname).toBe(prefix + '/api/tianji/v1/process-instances/process%20%2F%2B%E8%B4%A6/migration-preflight')
     expect(Object.fromEntries(uri.searchParams)).toEqual({targetReleaseVersion: 'release-2',
       expectedTargetManifestSha256: 'a'.repeat(64)})
-    expect(request).toMatchObject({method: 'GET', cache: 'no-store', credentials: 'include'})
+    expect(request).toMatchObject({method: 'GET', cache: 'no-store', credentials: 'omit'})
     expect(new Headers(request?.headers).get('X-Egon-Tianji-Tenant')).toBe('20')
     controller.abort()
     expect(request?.signal?.aborted).toBe(true)

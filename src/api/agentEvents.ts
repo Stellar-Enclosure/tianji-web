@@ -1,5 +1,6 @@
+import {ApiError, PublicOAuthError} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {gatewayAuth} from '../auth/gatewayAuth'
-import {TENANT_HEADER, isCanonicalTenant, notifyAuthFailure} from './client'
+import {TENANT_HEADER, createTianjiTransport, isCanonicalTenant, notifyAuthFailure} from './client'
 import {eventPath, isAgentEvent, type AgentEvent} from './agent'
 
 const MAX_FRAME = 2_097_152
@@ -10,13 +11,13 @@ type ConnectionState = 'connecting' | 'live' | 'reconnecting'
 type Outcome = 'complete' | 'rotate' | 'disconnected'
 
 export class AgentStreamError extends Error {
-  constructor(readonly code: 'CURSOR_EXPIRED' | 'INVALID_STREAM' | 'DISCONNECTED' | 'AUTH_CHANGED' | 'NOT_FOUND') {
+  constructor(readonly code: 'CURSOR_EXPIRED' | 'INVALID_STREAM' | 'DISCONNECTED' | 'AUTH_CHANGED' | 'NOT_FOUND' | 'UNAVAILABLE') {
     super(code)
     this.name = 'AgentStreamError'
   }
 }
 
-/** Cookie-only SSE reader; closing this subscription never sends a run cancellation. */
+/** Reads persisted events under one resource authorization until the reader closes or the epoch changes. */
 export async function observeAgentRun(options: Readonly<{
   tenantId: string
   runId: string
@@ -29,76 +30,41 @@ export async function observeAgentRun(options: Readonly<{
       || !Number.isSafeInteger(options.afterSequence) || options.afterSequence < 0) {
     throw new AgentStreamError('INVALID_STREAM')
   }
+  if (options.signal.aborted) return
+  const captured = gatewayAuth.context.capture(options.signal)
+  const transport = (() => {
+    try { return createTianjiTransport(options.tenantId, CONNECT_TIMEOUT) }
+    catch (failure) { throwStreamFailure(failure); throw failure }
+  })()
   let cursor = options.afterSequence
   let failures = 0
   while (!options.signal.aborted) {
-    const captured = gatewayAuth.context.capture(options.signal)
+    captured.assertCurrent()
     options.onState(failures === 0 ? 'connecting' : 'reconnecting')
-    const connection = new AbortController()
     const idle = new AbortController()
-    let connectTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => connection.abort(), CONNECT_TIMEOUT)
-    let idleTimer: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
     const resetIdle = () => {
-      if (idleTimer) clearTimeout(idleTimer)
-      idleTimer = setTimeout(() => idle.abort(), IDLE_TIMEOUT)
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => idle.abort(), IDLE_TIMEOUT)
     }
     const started = performance.now()
     let progressed = false
-    let outcome: Outcome
     try {
-      const response = await fetch(gatewayAuth.applicationBaseUrl + eventPath(options.runId, cursor), {
-        method: 'GET', credentials: 'include', redirect: 'error', cache: 'no-store',
-        headers: {Accept: 'text/event-stream', [TENANT_HEADER]: options.tenantId,
-          ...(cursor > 0 ? {'Last-Event-ID': String(cursor)} : {})},
-        signal: AbortSignal.any([captured.signal, connection.signal, idle.signal]),
-      })
-      clearTimeout(connectTimer)
-      connectTimer = undefined
-      captured.assertCurrent()
-      if (response.status === 401) {
-        gatewayAuth.context.invalidate()
-        notifyAuthFailure('unauthenticated')
-        throw new AgentStreamError('AUTH_CHANGED')
-      }
-      if (response.status === 403 || response.status === 409) {
-        notifyAuthFailure(response.status === 403 ? 'forbidden' : 'tenant-changed')
-        throw new AgentStreamError('AUTH_CHANGED')
-      }
-      if (response.status === 410) throw new AgentStreamError('CURSOR_EXPIRED')
-      if (response.status === 404) throw new AgentStreamError('NOT_FOUND')
-      if (response.status === 400 || response.status === 422) throw new AgentStreamError('INVALID_STREAM')
-      if (!response.ok) throw new Error('stream unavailable')
-      if (response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() !== 'text/event-stream'
-        || !response.body) throw new AgentStreamError('INVALID_STREAM')
-      options.onState('live')
-      resetIdle()
-      const parser = new EventParser(options.runId, () => cursor, event => {
-        captured.assertCurrent()
-        options.onEvent(event)
-        cursor = event.sequence
-        progressed = true
-      })
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder('utf-8', {fatal: true})
-      try {
-        while (true) {
-          const part = await reader.read()
+      const outcome = await transport.withEventStream(eventPath(options.runId, cursor), async (response, signal) => {
+        if (!response.body) throw new AgentStreamError('INVALID_STREAM')
+        options.onState('live')
+        resetIdle()
+        const parser = new EventParser(options.runId, () => cursor, event => {
           captured.assertCurrent()
-          if (part.done) {
-            outcome = parser.feed(decoder.decode())
-            break
-          }
-          resetIdle()
-          if (part.value.byteLength > MAX_FRAME * 2) throw new AgentStreamError('INVALID_STREAM')
-          outcome = parser.feed(decoder.decode(part.value, {stream: true}))
-          if (outcome !== 'disconnected') break
-        }
-      } catch (failure) {
-        if (failure instanceof TypeError) throw new AgentStreamError('INVALID_STREAM')
-        throw failure
-      } finally {
-        await reader.cancel().catch(() => {})
-      }
+          signal.throwIfAborted()
+          options.onEvent(event)
+          cursor = event.sequence
+          progressed = true
+        })
+        return readEvents(response.body, parser, signal, resetIdle)
+      }, {method: 'GET', headers: {[TENANT_HEADER]: options.tenantId,
+        ...(cursor > 0 ? {'Last-Event-ID': String(cursor)} : {})},
+      signal: AbortSignal.any([captured.signal, idle.signal])})
       if (outcome === 'complete') return
       if (outcome === 'rotate' && performance.now() - started >= 1_000) {
         failures = 0
@@ -106,18 +72,65 @@ export async function observeAgentRun(options: Readonly<{
         continue
       }
     } catch (failure) {
-      if (failure instanceof AgentStreamError && failure.code === 'AUTH_CHANGED') throw failure
+      throwStreamFailure(failure)
       captured.assertCurrent()
-      if (failure instanceof AgentStreamError) throw failure
     } finally {
-      if (connectTimer) clearTimeout(connectTimer)
-      if (idleTimer) clearTimeout(idleTimer)
+      if (timer) clearTimeout(timer)
     }
     if (progressed) failures = 0
     failures += 1
     if (failures > MAX_FAILURES) throw new AgentStreamError('DISCONNECTED')
     options.onState('reconnecting')
     await pause(Math.min(4_000, 250 * 2 ** (failures - 1)), captured.signal)
+  }
+}
+
+function throwStreamFailure(failure: unknown): void {
+  if (failure instanceof AgentStreamError) throw failure
+  if (failure instanceof PublicOAuthError && failure.code === 'AUTHORIZATION_REQUIRED') {
+    notifyAuthFailure('unauthenticated')
+    throw new AgentStreamError('AUTH_CHANGED')
+  }
+  if (!(failure instanceof ApiError)) return
+  switch (failure.status) {
+    case 401:
+    case 403: throw new AgentStreamError('AUTH_CHANGED')
+    case 409:
+      notifyAuthFailure('tenant-changed')
+      throw new AgentStreamError('AUTH_CHANGED')
+    case 410: throw new AgentStreamError('CURSOR_EXPIRED')
+    case 404: throw new AgentStreamError('NOT_FOUND')
+    case 503: throw new AgentStreamError('UNAVAILABLE')
+    case 400:
+    case 422: throw new AgentStreamError('INVALID_STREAM')
+  }
+  if (failure.code === 'INVALID_RESPONSE') throw new AgentStreamError('INVALID_STREAM')
+}
+
+async function readEvents(body: ReadableStream<Uint8Array>, parser: EventParser, signal: AbortSignal,
+  resetIdle: () => void): Promise<Outcome> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder('utf-8', {fatal: true})
+  const release = () => { void reader.cancel().catch(() => {}) }
+  signal.addEventListener('abort', release, {once: true})
+  try {
+    for (;;) {
+      signal.throwIfAborted()
+      const part = await reader.read()
+      signal.throwIfAborted()
+      if (part.done) return parser.feed(decoder.decode())
+      resetIdle()
+      if (part.value.byteLength > MAX_FRAME * 2) throw new AgentStreamError('INVALID_STREAM')
+      const outcome = parser.feed(decoder.decode(part.value, {stream: true}))
+      if (outcome !== 'disconnected') return outcome
+    }
+  } catch (failure) {
+    signal.throwIfAborted()
+    if (failure instanceof TypeError) throw new AgentStreamError('INVALID_STREAM')
+    throw failure
+  } finally {
+    signal.removeEventListener('abort', release)
+    await reader.cancel().catch(() => {})
   }
 }
 

@@ -53,12 +53,12 @@ function requestFor(fetcher: ReturnType<typeof stub>) {
   expect(fetcher).toHaveBeenCalledTimes(1)
   const [url, init] = fetcher.mock.calls[0]
   const uri = new URL(String(url), 'https://example.test')
-  const prefix = new URL(gatewayAuth.applicationBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
+  const prefix = new URL(gatewayAuth.authority('20').apiBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
   const headers = new Headers(init?.headers)
-  expect(init).toMatchObject({cache: 'no-store', credentials: 'include'})
+  expect(init).toMatchObject({cache: 'no-store', credentials: 'omit'})
   expect(headers.get('X-Egon-Tianji-Tenant')).toBe('20')
-  expect(headers.get('Authorization')).toBeNull()
-  if (init?.method === 'POST') expect(headers.get('X-CSRF-TOKEN')).toBe('test-csrf')
+  expect(headers.get('Authorization')).toBe('Bearer tianji-resource-token')
+  if (init?.method === 'POST') expect(headers.get('X-CSRF-TOKEN')).toBeNull()
   return {path: uri.pathname.slice(prefix.length), query: uri.search, init}
 }
 
@@ -66,7 +66,7 @@ describe('Versioned process automation client', () => {
   beforeEach(() => {
     gatewayAuth.context.invalidate()
     vi.stubGlobal('crypto', webcrypto)
-    vi.spyOn(gatewayAuth, 'csrf').mockResolvedValue({headerName: 'X-CSRF-TOKEN', token: 'test-csrf', expiresAt: new Date(Date.now() + 60_000).toISOString()})
+
   })
   afterEach(() => { gatewayAuth.context.invalidate(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 

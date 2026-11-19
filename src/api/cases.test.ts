@@ -5,7 +5,7 @@ import {casesApi, type ActOnPlanItemCommand, type CaseInstance, type CasePlanIte
 import {setAuthFailureHandler} from './client'
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json'}})
-const gatewayPath = (route: string): string => new URL(`${gatewayAuth.applicationBaseUrl.replace(/\/$/, '')}${route}`, 'https://example.test').pathname
+const gatewayPath = (route: string): string => new URL(`${gatewayAuth.authority('20').apiBaseUrl.replace(/\/$/, '')}${route}`, 'https://example.test').pathname
 const source = caseInstance()
 const command = caseActionCommand()
 const rejected = (call: () => unknown) => expect(Promise.resolve().then(call)).rejects.toThrow()
@@ -20,7 +20,6 @@ const actionSource = (action: CasePlanItemAction): readonly [CaseInstance, ActOn
 describe('Formal Case current-user JSON client', () => {
   beforeEach(() => {
     gatewayAuth.context.invalidate()
-    vi.spyOn(gatewayAuth, 'csrf').mockResolvedValue({headerName: 'X-CSRF-TOKEN', token: 'test-csrf', expiresAt: new Date(Date.now() + 60_000).toISOString()})
   })
   afterEach(() => { gatewayAuth.context.invalidate(); setAuthFailureHandler(() => {}); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -40,15 +39,14 @@ describe('Formal Case current-user JSON client', () => {
       const request = call[1] as RequestInit
       expect(request.method).toBe('POST')
       expect(request.signal).toBeInstanceOf(AbortSignal)
-      expect(request.signal?.aborted).toBe(false)
+      expect(request.signal?.aborted).toBe(true)
       expect(JSON.parse(String(request.body))).toEqual(bodies[index])
-      expect(request.credentials).toBe('include')
-      expect(new Headers(request.headers).get('Authorization')).toBeNull()
-      expect(new Headers(request.headers).get('X-CSRF-TOKEN')).toBe('test-csrf')
+      expect(request.credentials).toBe('omit')
+      expect(new Headers(request.headers).get('Authorization')).toBe('Bearer tianji-resource-token')
+      expect(new Headers(request.headers).get('X-CSRF-TOKEN')).toBeNull()
       expect(new Headers(request.headers).get('X-Egon-Tianji-Tenant')).toBe('20')
     })
-    controller.abort()
-    fetcher.mock.calls.forEach(call => expect((call[1] as RequestInit).signal?.aborted).toBe(true))
+    expect(controller.signal.aborted).toBe(false)
   })
 
   it('rejects unchecked foreign, missing, coerced, and extra Case projections after one response', async () => {

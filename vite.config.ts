@@ -21,8 +21,7 @@ export default defineConfig(async ({command, mode}) => {
     base,
     plugins: [react(), egonFaviconPlugin(), ...permissionPlugins],
     resolve: {dedupe: ['react', 'react-dom', 'react-router-dom', 'antd', '@tanstack/react-query', 'i18next', 'react-i18next']},
-    server: {host: '127.0.0.1', port: 18153, strictPort: true,
-      proxy: {'/apps': {target: process.env.TIANJI_AUTH_PROXY ?? 'http://127.0.0.1:18180', changeOrigin: false}}},
+    server: {host: '127.0.0.1', port: 18153, strictPort: true},
     test: {environment: 'jsdom', globals: true, fileParallelism: false, setupFiles: './src/test/setup.ts'},
     build: {sourcemap: false, chunkSizeWarningLimit: 900},
   }

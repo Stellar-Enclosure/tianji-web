@@ -1,4 +1,4 @@
-import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {ApiError, type PublicOAuthIdentity} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Descriptions, Empty, Space, Spin, Tag, Typography} from 'antd'
 import {useCallback, useEffect, useRef, useState} from 'react'
 import {Link, useParams} from 'react-router-dom'
@@ -7,6 +7,7 @@ import {AgentStreamError, observeAgentRun} from '../api/agentEvents'
 import {agentRecoveryApi, type RecoveryDisposition} from '../api/agentRecovery'
 import {isProcessCorrelationUtc} from '../api/processCorrelations'
 import {useAuth} from '../auth/AuthContext'
+import {openAgentEventCheckpoint} from '../auth/agentEventCheckpoint'
 import {StatusTag} from './AgentRunsPage'
 
 type VisibleToolEvent = Readonly<{toolKey: string; version: number; state: ToolEventState;
@@ -30,11 +31,14 @@ const TOOL_ERROR = /^[A-Z][A-Z0-9_]{0,63}(?![\s\S])/
 export default function AgentRunDetailPage() {
   const {runId = ''} = useParams()
   const {authorization} = useAuth()
-  const tenant = authorization?.identity.tenantId ?? ''
-  return <AgentRunDetailContent key={JSON.stringify([authorization?.identity.issuer, tenant, authorization?.identity.subject, authorization?.binding.requestEpoch, runId])} runId={runId} tenant={tenant} />
+  if (!authorization) return null
+  const identity = authorization.identity
+  return <AgentRunDetailContent key={JSON.stringify([identity.issuer, identity.tenantId, identity.subject, authorization.binding.requestEpoch, runId])}
+    runId={runId} identity={identity} />
 }
 
-function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string}) {
+function AgentRunDetailContent({runId, identity}: {runId: string; identity: PublicOAuthIdentity}) {
+  const tenant = identity.tenantId
   const {allows} = useAuth()
   const [run, setRun] = useState<AgentRun>()
   const [result, setResult] = useState<AgentResult>()
@@ -66,11 +70,15 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
     const controller = new AbortController()
     lifetime.current = controller
     if (!isRunId(runId)) return () => controller.abort()
+    let checkpoint: Awaited<ReturnType<typeof openAgentEventCheckpoint>> | undefined
     void (async () => {
+      checkpoint = await openAgentEventCheckpoint(identity, runId)
+      controller.signal.throwIfAborted()
       await refresh(controller.signal)
-      await observeAgentRun({tenantId: tenant, runId, afterSequence: 0, signal: controller.signal,
+      await observeAgentRun({tenantId: tenant, runId, afterSequence: checkpoint.read(), signal: controller.signal,
         onState: setConnection,
         onEvent: event => {
+          checkpoint?.advance(event.sequence)
           setEvents(previous => [...previous, visible(event)].slice(-200))
           if ((event.type === 'TEXT_DELTA' || event.type === 'AGENT_OUTPUT') && typeof event.payload.text === 'string') {
             const author = event.author ?? 'Agent'
@@ -98,11 +106,16 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
       if (controller.signal.aborted || isAbort(failure)) return
       if (failure instanceof AgentStreamError && failure.code === 'AUTH_CHANGED') return
       if (failure instanceof AgentStreamError && failure.code === 'CURSOR_EXPIRED') {
+        checkpoint?.clear()
         setNotice('部分历史事件已过期，当前状态和结果仍可查询。')
         setConnection('ended')
         void refresh(controller.signal).catch(error => {
           if (!controller.signal.aborted && !isAbort(error)) setError('无法读取当前运行状态。')
         })
+      } else if ((failure instanceof ApiError && failure.status === 503)
+        || (failure instanceof AgentStreamError && failure.code === 'UNAVAILABLE')) {
+        setConnection('ended')
+        setError('运行服务暂时不可用，请稍后刷新。')
       } else if ((failure instanceof ApiError && failure.status === 404)
         || (failure instanceof AgentStreamError && failure.code === 'NOT_FOUND')) {
         setError('运行不存在，或当前身份无权查看。')
@@ -116,7 +129,7 @@ function AgentRunDetailContent({runId, tenant}: {runId: string; tenant: string})
       refreshSequence.current += 1
       if (lifetime.current === controller) lifetime.current = null
     }
-  }, [runId, tenant, refresh, reload])
+  }, [runId, tenant, identity, refresh, reload])
 
   const sendCancellation = async (command: CancelCommand) => {
     if (mutation.current) return

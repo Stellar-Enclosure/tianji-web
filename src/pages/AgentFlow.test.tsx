@@ -16,11 +16,10 @@ const event = (sequence: number, type: string, payload: Record<string, unknown>)
     sequence, type, author: null, occurredAt: '2026-10-28T00:00:00Z', payload})}\n\n`
 
 beforeEach(() => {
+  sessionStorage.clear()
   gatewayAuth.context.invalidate()
   vi.mocked(useAuth).mockReturnValue({status: 'ready', authorization: authorization(), allows: () => true,
     login: () => {}, logout: async () => {}, retry: async () => {}})
-  vi.spyOn(gatewayAuth, 'csrf').mockResolvedValue({headerName: 'X-CSRF-TOKEN', token: 'test-csrf',
-    expiresAt: new Date(Date.now() + 60_000).toISOString()})
 })
 afterEach(() => { gatewayAuth.context.invalidate(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -66,9 +65,47 @@ it('opens an existing run and observes its persisted events and cancellation', a
   const requests = fetcher.mock.calls.map(([, init]) => init as RequestInit)
   expect(fetcher.mock.calls.some(([input, init]) => new URL(String(input), 'https://example.test').pathname.endsWith('/agent-runs')
     && init?.method === 'POST')).toBe(false)
-  expect(requests.every(request => request.credentials === 'include')).toBe(true)
-  expect(requests.every(request => new Headers(request.headers).get('Authorization') === null)).toBe(true)
+  expect(requests.every(request => request.credentials === 'omit')).toBe(true)
+  expect(requests.every(request => new Headers(request.headers).get('Authorization') === 'Bearer tianji-resource-token')).toBe(true)
   expect(requests.every(request => new Headers(request.headers).get('X-Egon-Tianji-Tenant') === '20')).toBe(true)
   expect(requests.filter(request => request.method === 'POST')
-    .every(request => new Headers(request.headers).get('X-CSRF-TOKEN') === 'test-csrf')).toBe(true)
+    .every(request => new Headers(request.headers).get('X-CSRF-TOKEN') === null)).toBe(true)
+})
+
+it('resumes the last observed event after reauthorization only for the same verified actor and run', async () => {
+  const observed: {cursor: string | null; lastEventId: string | null}[] = []
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input))
+    expect(init?.method ?? 'GET').toBe('GET')
+    if (!url.pathname.endsWith('/events')) return json(run())
+    const cursor = url.searchParams.get('afterSequence')
+    observed.push({cursor, lastEventId: new Headers(init?.headers).get('Last-Event-ID')})
+    return new Response(event(Number(cursor) + 1, 'RUN_QUEUED', {status: 'QUEUED'}) + 'event: stream.complete\n\n',
+      {headers: {'Content-Type': 'text/event-stream'}})
+  }
+  vi.stubGlobal('fetch', fetcher)
+  const openRun = () => render(<MemoryRouter initialEntries={['/runs/run-1']}><Routes>
+    <Route path="/runs/:runId" element={<AgentRunDetailPage />} />
+  </Routes></MemoryRouter>)
+
+  const beforeReauthorization = openRun()
+  await screen.findByText(/#1 RUN_QUEUED/)
+  beforeReauthorization.unmount()
+
+  const sameActor = openRun()
+  await screen.findByText(/#2 RUN_QUEUED/)
+  expect(screen.queryByText(/#1 RUN_QUEUED/)).not.toBeInTheDocument()
+  sameActor.unmount()
+
+  const signed = authorization()
+  vi.mocked(useAuth).mockReturnValue({...vi.mocked(useAuth)(), authorization: {
+    ...signed, identity: {...signed.identity, subject: 'another-operator'},
+  }})
+  openRun()
+  await screen.findByText(/#1 RUN_QUEUED/)
+  expect(observed).toEqual([
+    {cursor: '0', lastEventId: null},
+    {cursor: '1', lastEventId: '1'},
+    {cursor: '0', lastEventId: null},
+  ])
 })

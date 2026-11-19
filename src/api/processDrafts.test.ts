@@ -60,17 +60,17 @@ function mockFetch() {
 
 function expectRequest(call: Parameters<typeof fetch>, method: string, path: string, query: string, body?: unknown) {
   const [url, init] = call
-  const prefix = new URL(gatewayAuth.applicationBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
+  const prefix = new URL(gatewayAuth.authority('20').apiBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
   const uri = new URL(String(url), 'https://example.test')
   expect(uri.pathname).toBe(prefix + base + path)
   expect(uri.search).toBe(query)
-  expect(init).toMatchObject({method, cache: 'no-store', credentials: 'include'})
+  expect(init).toMatchObject({method, cache: 'no-store', credentials: 'omit'})
   const headers = new Headers(init?.headers)
   expect(headers.get('X-Egon-Tianji-Tenant')).toBe('20')
   if (body === undefined) {
     expect(init?.body).toBeUndefined()
   } else {
-    expect(headers.get('X-CSRF-TOKEN')).toBe('test-csrf')
+    expect(headers.get('X-CSRF-TOKEN')).toBeNull()
     expect(headers.get('Content-Type')).toContain('application/json')
     expect(JSON.parse(String(init?.body))).toEqual(body)
   }
@@ -84,8 +84,7 @@ function withoutField(value: Record<string, unknown>, field: string) {
 
 beforeEach(() => {
   gatewayAuth.context.invalidate()
-  vi.spyOn(gatewayAuth, 'csrf').mockResolvedValue({headerName: 'X-CSRF-TOKEN', token: 'test-csrf',
-    expiresAt: new Date(Date.now() + 60_000).toISOString()})
+
 })
 
 afterEach(() => {

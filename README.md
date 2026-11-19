@@ -2,7 +2,7 @@
 
 React console for Tianji processes, Cases and historical Agent runs. Use the Process workspace to save a draft, publish a fixed revision and activate its release separately. New work starts from the active release. The console lists prior Agent runs for the current identity, displays persisted events and results, and requests cancellation. Event subscriptions resume from the last sequence. Retrying an uncertain write keeps its original operation identifier. Services enforce tenant isolation and permissions.
 
-The application uses the shared Enterprise layout, gateway Cookie/CSRF client and Jianshen resource registry. It does not store browser bearer tokens. The permission view must match the verified issuer, subject, tenant and catalog scope before routes or actions are shown. The `X-Egon-Tianji-Tenant` header checks that the gateway session has not changed; it does not select a tenant.
+The application uses the shared Enterprise layout, PUBLIC OAuth with S256 PKCE, and the Jianshen resource registry. REST and Agent SSE attach the Bearer for the deployed Tianji Resource. The verified issuer, subject, tenant and catalog scope must match the current permission snapshot.
 
 Business applications own task inboxes, assignments, forms, opinions, attachments and Memory management. Their task completion sends the permitted typed result or an opaque business `resultRef` to Process. Old Task and Memory bookmarks open a static handoff without reading authorization or calling business APIs.
 
@@ -25,9 +25,14 @@ Each workspace checks its page resource. `TIANJI_PROCESS_DATA_READ` governs acce
 Copy `.env.example` to an ignored local environment file and set:
 
 - `VITE_PERMISSION_NAMESPACE` and `VITE_PERMISSION_ENVIRONMENT`: the fixed catalog scope of the deployed Tianji permission view. Missing or mismatched values deny access.
-- `VITE_OAUTH_APP_ALIAS`: gateway application alias; defaults to `edge-tianji`.
-- `VITE_YUHENG_ORIGIN`: gateway origin, or empty for same-origin access.
-- `VITE_BASE_PATH`: optional static mount path, default `/`.
+- `VITE_TIANJI_OAUTH_CONFIG` contains the deployment-owned tenant PUBLIC registrations, `activeResource`, `webOrigin`, `resource` and `apiBaseUrl`. Every registration follows `PublicOAuthRegistration` from the shared SDK and uses the same Tianji Resource and API base. Set `webOrigin` to the console's approved HTTPS origin.
+- Register `${webOrigin}${base}auth/oidc/callback/${registration.id}` exactly for the console SPA. For Wujie popup authorization, also register `${webOrigin}${base}auth/oidc/popup/${registration.id}` and set the registration's `popupRedirectUri`. Serve the SPA at both paths. The embedded console matches its issuer, tenant and Resource against its own registration before opening the popup. Its independent URL remains available if the popup is blocked.
+- `VITE_BASE_PATH` sets the static console base prefix, with `/` as the default. Use the same base when registering the callback URIs.
+- Set `VITE_PERMISSION_NAMESPACE` and `VITE_PERMISSION_ENVIRONMENT` to the backend permission catalog scope.
+
+In Portal, the Tianji popup callback must share the browser opener's origin. Publish the console on a unique path under the Portal origin when using embedded authorization. The console provides an approved standalone link when the popup is unavailable.
+
+Use an approved same-origin Cilium route for the console and Tianji API when deploying the current Agent Server. A deployment with separate Web/API origins requires matching backend CORS preflight, including Authorization, `X-Egon-Tianji-Tenant`, and `Last-Event-ID`. Expired sessions use a new authorization flow. Pending writes remain explicit user actions, and reconnecting a stream only resumes observation. A same-tab reauthorization resumes from the previously observed sequence for the same verified identity and Run. The browser stores only the binding digest and sequence, and explicit sign-out removes it.
 
 The development proxy forwards `/apps` to `TIANJI_AUTH_PROXY`, defaulting to `http://127.0.0.1:18180`. The gateway must route the alias and Tianji API and supply identity, CSRF and permission endpoints. Configure and run that environment separately.
 

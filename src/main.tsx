@@ -3,6 +3,7 @@ import {createRoot, type Root} from 'react-dom/client'
 import {AdminThemeProvider, I18nProvider, initI18n, injectTokens} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import 'antd/dist/reset.css'
 import App, {createConsoleRouter} from './App'
+import {gatewayAuth} from './auth/gatewayAuth'
 import './styles.css'
 
 injectTokens()
@@ -29,6 +30,7 @@ const unmount = () => {
   try {
     root?.unmount()
   } finally {
+    void gatewayAuth.logout().catch(() => gatewayAuth.invalidate())
     router?.dispose()
     router = undefined
     root = undefined

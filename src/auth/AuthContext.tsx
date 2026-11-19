@@ -1,13 +1,14 @@
 import {createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react'
-import type {GatewayIdentityResult} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {PublicOAuthError, type PublicOAuthIdentity} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {isPermissionSnapshot, snapshotContext, type PermissionSnapshot,
   type PermissionSnapshotContext} from '@stellar-enclosure/stellar-enclosure-web-shared/permissions'
 import {isCanonicalTenant, setAuthFailureHandler} from '../api/client'
 import {resourceRegistry} from '../permissions/registry'
 import {gatewayAuth} from './gatewayAuth'
+import {clearAgentEventCheckpoint} from './agentEventCheckpoint'
 
 export type Authorization = Readonly<{
-  identity: GatewayIdentityResult
+  identity: PublicOAuthIdentity
   snapshot: PermissionSnapshot
   binding: PermissionSnapshotContext
 }>
@@ -17,8 +18,9 @@ type AuthValue = Readonly<{
   authorization?: Authorization
   error?: string
   allows: (resource: string) => boolean
-  login: () => void
-  logout: () => Promise<void>
+  login: (returnTo?: string) => void
+  logout: (sso?: boolean) => Promise<void>
+  standaloneUrl?: string
   retry: () => Promise<void>
 }>
 
@@ -44,7 +46,7 @@ function storedRecoverySlots(storage: Storage) {
   return slots
 }
 
-async function recoveryOwnerFingerprints(identity: GatewayIdentityResult) {
+async function recoveryOwnerFingerprints(identity: PublicOAuthIdentity) {
   try {
     const domains = new Set(storedRecoverySlots(sessionStorage).map(slot => slot.domain))
     const encoder = new TextEncoder()
@@ -94,7 +96,7 @@ function clearRecoveryPointers() {
   try {
     for (const {key} of storedRecoverySlots(sessionStorage)) sessionStorage.removeItem(key)
   } catch {
-    // A browser can disallow session storage independently of the EDGE session.
+    // Storage permissions do not affect revocation of the in-memory authorization.
   }
 }
 
@@ -104,6 +106,7 @@ export function AuthProvider({children}: {children: ReactNode}) {
   const [error, setError] = useState<string>()
   const sequence = useRef(0)
   const pending = useRef<AbortController | null>(null)
+  const pendingLogin = useRef<AbortController | null>(null)
 
   const retry = useCallback(async () => {
     gatewayAuth.context.invalidate()
@@ -115,8 +118,9 @@ export function AuthProvider({children}: {children: ReactNode}) {
     setStatus('loading')
     setError(undefined)
     try {
-      const identity = await gatewayAuth.identity(controller.signal)
+      const identity = await gatewayAuth.identity()
       if (serial !== sequence.current) return
+      if (!identity) { setStatus('signed-out'); return }
       const captured = gatewayAuth.context.capture(controller.signal)
       if (!isCanonicalTenant(identity.tenantId)) throw new Error('可信租户上下文不可用')
       const fingerprints = await recoveryOwnerFingerprints(identity)
@@ -141,11 +145,12 @@ export function AuthProvider({children}: {children: ReactNode}) {
     } catch (failure) {
       if (controller.signal.aborted || serial !== sequence.current) return
       setAuthorization(undefined)
-      if (typeof failure === 'object' && failure !== null && 'status' in failure && failure.status === 401) {
+      if ((failure instanceof PublicOAuthError && failure.code === 'AUTHORIZATION_REQUIRED')
+        || (typeof failure === 'object' && failure !== null && 'status' in failure && failure.status === 401)) {
         setStatus('signed-out')
       } else {
         setStatus('error')
-        setError('无法验证当前会话或权限范围，请检查连接与配置后重试。')
+        setError('无法验证当前身份或权限范围，请检查连接与配置后重试。')
       }
     }
   }, [])
@@ -169,6 +174,7 @@ export function AuthProvider({children}: {children: ReactNode}) {
       unsubscribe()
       sequence.current += 1
       pending.current?.abort()
+      pendingLogin.current?.abort()
       setAuthFailureHandler(() => {})
     }
   }, [retry])
@@ -180,18 +186,30 @@ export function AuthProvider({children}: {children: ReactNode}) {
     return () => clearTimeout(timer)
   }, [authorization])
 
-  const login = useCallback(() => gatewayAuth.login(), [])
-  const logout = useCallback(async () => {
-    const resultPromise = gatewayAuth.logout()
-    // The SDK invalidates the previous epoch synchronously as logout begins.
+  const login = useCallback((returnTo = '/') => {
+    pendingLogin.current?.abort()
+    const controller = new AbortController()
+    pendingLogin.current = controller
+    setError(undefined)
+    void gatewayAuth.login(returnTo, controller.signal).then(async () => {
+      const identity = await gatewayAuth.identity()
+      if (identity && !controller.signal.aborted) await retry()
+    }).catch(() => {
+      if (!controller.signal.aborted) setError('无法完成登录。请重试或从独立入口授权。')
+    }).finally(() => {
+      if (pendingLogin.current === controller) pendingLogin.current = null
+    })
+  }, [retry])
+  const logout = useCallback(async (sso = false) => {
+    pendingLogin.current?.abort()
+    clearAgentEventCheckpoint()
+    const result = gatewayAuth.logout(sso)
     const epoch = gatewayAuth.context.epoch
     const serial = sequence.current
     const isCurrent = () => epoch === gatewayAuth.context.epoch && serial === sequence.current
     try {
-      const result = await resultPromise
-      if (!isCurrent()) return
-      if (result.status === 'LOCAL_CLOSED') clearRecoveryPointers()
-      if (result.remoteState !== 'CONFIRMED') setError('本地会话已关闭，远端退出状态尚未确认。')
+      await result
+      if (isCurrent()) clearRecoveryPointers()
     } catch {
       if (isCurrent()) setError('退出操作未完成，请重试。')
     }
@@ -199,7 +217,7 @@ export function AuthProvider({children}: {children: ReactNode}) {
   const allows = useCallback((resource: string) => !!authorization
     && authorization.binding.requestEpoch === gatewayAuth.context.epoch
     && resourceRegistry.canAccessResource(resource, authorization.snapshot, authorization.binding), [authorization])
-  const value = useMemo(() => ({status, authorization, error, allows, login, logout, retry}),
+  const value = useMemo(() => ({status, authorization, error, allows, login, logout, retry, standaloneUrl: gatewayAuth.standaloneUrl()}),
     [status, authorization, error, allows, login, logout, retry])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

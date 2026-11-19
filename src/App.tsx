@@ -1,9 +1,10 @@
 import {AppstoreOutlined, AuditOutlined, FileSearchOutlined, FileTextOutlined, FolderOpenOutlined, LogoutOutlined, WarningOutlined} from '@ant-design/icons'
 import {EnterpriseLayout, type EnterpriseLayoutConfig} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Result, Spin, Tag} from 'antd'
-import {useState, type ReactNode} from 'react'
-import {createBrowserRouter, Link, matchPath, Navigate, Outlet, Route, RouterProvider, Routes, useLocation} from 'react-router-dom'
+import {useEffect, useState, type ReactNode} from 'react'
+import {createBrowserRouter, Link, matchPath, Navigate, Outlet, Route, RouterProvider, Routes, useLocation, useNavigate} from 'react-router-dom'
 import {AuthProvider, useAuth} from './auth/AuthContext'
+import {gatewayAuth, LOGIN_CALLBACK, POPUP_CALLBACK} from './auth/gatewayAuth'
 import AgentRunDetailPage from './pages/AgentRunDetailPage'
 import AgentRunsPage from './pages/AgentRunsPage'
 import CaseDetailPage from './pages/CaseDetailPage'
@@ -42,11 +43,31 @@ function ConsoleEntry() {
   const {pathname} = useLocation()
   const legacy = legacyBookmarks.some(path => matchPath({path, caseSensitive: true, end: true}, pathname) !== null)
   const [sessionStarted, setSessionStarted] = useState(!legacy)
+  if (matchPath({path: LOGIN_CALLBACK, caseSensitive: true, end: true}, pathname)) return <OAuthCallback popup={false} />
+  if (matchPath({path: POPUP_CALLBACK, caseSensitive: true, end: true}, pathname)) return <OAuthCallback popup />
   if (!sessionStarted) {
     if (legacy) return <LegacyBusinessHandoff />
     setSessionStarted(true)
   }
   return <AuthProvider><SessionRoutes legacy={legacy} /></AuthProvider>
+}
+
+function OAuthCallback({popup}: {popup: boolean}) {
+  const navigate = useNavigate()
+  const [address] = useState(() => window.location.href)
+  const [state, setState] = useState<'pending' | 'done' | 'failed'>('pending')
+  useEffect(() => {
+    let active = true
+    void gatewayAuth.completeCallback(address, popup).then(returnTo => {
+      if (!active) return
+      if (returnTo) void navigate(returnTo, {replace: true})
+      else setState('done')
+    }, () => { if (active) setState('failed') })
+    return () => { active = false }
+  }, [address, popup, navigate])
+  return <main className="auth-shell"><Result status={state === 'failed' ? 'error' : 'info'}
+    title={state === 'failed' ? '无法完成登录' : state === 'done' ? '授权已返回' : '正在验证登录'}
+    extra={state === 'failed' && !popup ? <Link to="/">返回控制台</Link> : undefined} /></main>
 }
 
 function LegacyBusinessHandoff({canReturn = false}: {canReturn?: boolean}) {
@@ -57,7 +78,8 @@ function LegacyBusinessHandoff({canReturn = false}: {canReturn?: boolean}) {
 }
 
 function SessionRoutes({legacy}: {legacy: boolean}) {
-  const {status, error, login, retry, allows} = useAuth()
+  const {status, error, login, retry, allows, standaloneUrl} = useAuth()
+  const {pathname} = useLocation()
   if (legacy) return <LegacyBusinessHandoff canReturn={status === 'ready' && allows('tianji.app.console')} />
   if (status === 'loading') return <Spin fullscreen description="正在验证会话" />
   if (status !== 'ready') {
@@ -65,7 +87,8 @@ function SessionRoutes({legacy}: {legacy: boolean}) {
       <Result status={status === 'forbidden' ? '403' : status === 'error' ? 'error' : 'info'}
         title={status === 'forbidden' ? '没有访问权限' : status === 'error' ? '暂时无法验证' : '登录天机'}
         subTitle={error ?? (status === 'forbidden' ? '当前身份没有访问天机控制台的权限。' : '使用平台账号继续。')}
-        extra={status === 'signed-out' ? <Button type="primary" onClick={login}>登录</Button>
+        extra={status === 'signed-out' ? [<Button key="login" type="primary" onClick={() => login(pathname)}>登录</Button>,
+          standaloneUrl && <a key="standalone" href={standaloneUrl} target="_blank" rel="noopener noreferrer">独立打开</a>]
           : <Button type="primary" onClick={() => void retry()}>重新验证</Button>} />
     </Card></main>
   }
@@ -117,7 +140,8 @@ function Shell() {
     ],
     actions: <Tag color="success">会话已验证</Tag>,
     user: {name: authorization.identity.subject, description: `租户 ${authorization.identity.tenantId}`,
-      menu: [{key: 'logout', label: '退出登录', icon: <LogoutOutlined />, onClick: () => void logout()}]},
+      menu: [{key: 'logout', label: '退出登录', icon: <LogoutOutlined />, onClick: () => void logout()},
+        {key: 'sso-logout', label: '统一退出（SSO）', icon: <LogoutOutlined />, onClick: () => void logout(true)}]},
     footer: {version: '0.0.1'},
     labels: {mainMenu: '主导航', userMenu: '用户菜单', openNavigation: '打开导航', version: '版本'},
     ...(embedded ? {hideHeader: true, hideFooter: true} : {}),

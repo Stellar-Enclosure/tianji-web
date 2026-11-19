@@ -70,6 +70,15 @@ const open = (path: string, codes: string[], ready = false) => {
   return {router, ...render(<App router={router} />)}
 }
 
+it.each([['/auth/oidc/callback/test', false], ['/auth/oidc/popup/test', true]] as const)(
+  'processes the PUBLIC callback %s before starting the protected console', async (path, popup) => {
+    const complete = vi.spyOn(gatewayAuth, 'completeCallback').mockResolvedValueOnce(undefined)
+    open(path, [])
+    expect(await screen.findByText('授权已返回')).toBeInTheDocument()
+    expect(complete).toHaveBeenCalledWith(expect.stringContaining(path), popup)
+    expect(enterAuth).not.toHaveBeenCalled()
+  })
+
 describe('Console entry and Process route ownership', () => {
   it.each([
     [[publish], '/process-definitions', '流程设计'],

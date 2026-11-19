@@ -41,9 +41,7 @@ it('keeps the expense fixture as a formal Case projection only', async () => {
   expect(fixture).toMatchObject({schemaVersion: 1, releaseVersion: 'expense-v1'})
 
   gatewayAuth.context.invalidate()
-  vi.spyOn(gatewayAuth, 'csrf').mockResolvedValue({
-    headerName: 'X-CSRF-TOKEN', token: 'test-csrf', expiresAt: new Date(Date.now() + 60_000).toISOString(),
-  })
+
   const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json(fixture.caseInstance))
   vi.stubGlobal('fetch', fetcher)
 
@@ -62,7 +60,7 @@ it('keeps the expense fixture as a formal Case projection only', async () => {
     {planItemDefinitionKey: 'completionMilestone', kind: 'MILESTONE', state: 'AVAILABLE', availableActions: []},
   ])
 
-  const baseUrl = gatewayAuth.applicationBaseUrl.replace(/\/$/, '')
+  const baseUrl = gatewayAuth.authority('20').apiBaseUrl.replace(/\/$/, '')
   expect(fetcher).toHaveBeenCalledTimes(1)
   expect(fetcher.mock.calls.map(([url]) => new URL(String(url), 'https://example.test').pathname)).toEqual([
     new URL(baseUrl + '/api/tianji/v1/cases/get', 'https://example.test').pathname,
@@ -71,9 +69,9 @@ it('keeps the expense fixture as a formal Case projection only', async () => {
   for (const [, init] of fetcher.mock.calls) {
     const headers = new Headers(init?.headers)
     expect(init?.method).toBe('POST')
-    expect(init?.credentials).toBe('include')
+    expect(init?.credentials).toBe('omit')
     expect(headers.get('X-Egon-Tianji-Tenant')).toBe('20')
-    expect(headers.get('X-CSRF-TOKEN')).toBe('test-csrf')
-    expect(headers.get('Authorization')).toBeNull()
+    expect(headers.get('X-CSRF-TOKEN')).toBeNull()
+    expect(headers.get('Authorization')).toBe('Bearer tianji-resource-token')
   }
 })

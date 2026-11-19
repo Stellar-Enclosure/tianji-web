@@ -54,22 +54,21 @@ describe('Process-local Agent outcome reads', () => {
     await expect(processAgentOutcomesApi.list('20', id, cursor, controller.signal)).resolves.toEqual(page([applied]))
     expect(Object.keys(processAgentOutcomesApi)).toEqual(['list'])
     expect(fetcher).toHaveBeenCalledTimes(2)
-    const prefix = new URL(gatewayAuth.applicationBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
+    const prefix = new URL(gatewayAuth.authority('20').apiBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
     const urls = fetcher.mock.calls.map(([url]) => new URL(String(url), 'https://example.test'))
     for (const url of urls) expect(url.pathname).toBe(prefix + '/api/tianji/v1/process-instances/process%20%2F%2B%E8%B4%A6/agent-outcomes')
     expect(urls[0].search).toBe('')
     expect(urls[1].search).toBe('?cursor=' + cursor)
     for (const [, request] of fetcher.mock.calls) {
-      expect(request).toMatchObject({method: 'GET', credentials: 'include', cache: 'no-store'})
+      expect(request).toMatchObject({method: 'GET', credentials: 'omit', cache: 'no-store'})
       expect(request?.body).toBeUndefined()
       const headers = new Headers(request?.headers)
       expect(headers.get('X-Egon-Tianji-Tenant')).toBe('20')
-      expect(headers.get('Authorization')).toBeNull()
+      expect(headers.get('Authorization')).toBe('Bearer tianji-resource-token')
       expect(headers.get('X-CSRF-TOKEN')).toBeNull()
-      expect(request?.signal?.aborted).toBe(false)
+      expect(request?.signal?.aborted).toBe(true)
     }
-    controller.abort()
-    expect(fetcher.mock.calls.every(([, request]) => request?.signal?.aborted)).toBe(true)
+    expect(controller.signal.aborted).toBe(false)
   })
 
   it('rejects malformed instance IDs and non-outcome cursor syntax before dispatch', async () => {

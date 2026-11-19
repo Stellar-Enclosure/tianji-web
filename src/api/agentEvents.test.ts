@@ -19,7 +19,7 @@ describe('Agent SSE transport', () => {
   beforeEach(() => gatewayAuth.context.invalidate())
   afterEach(() => { gatewayAuth.context.invalidate(); setAuthFailureHandler(() => {}); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-  it('reconnects using the last delivered sequence and sends only cookie credentials', async () => {
+  it('reconnects using the last delivered sequence and sends only the Tianji Resource Bearer', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(response(frame(1)))
       .mockResolvedValueOnce(response(frame(1) + frame(2) + 'event: stream.complete\n\n'))
     vi.stubGlobal('fetch', fetcher)
@@ -29,8 +29,9 @@ describe('Agent SSE transport', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
     const first = fetcher.mock.calls[0][1] as RequestInit
     const second = fetcher.mock.calls[1][1] as RequestInit
-    expect(first.credentials).toBe('include')
-    expect(new Headers(first.headers).get('Authorization')).toBeNull()
+    expect(first.credentials).toBe('omit')
+    expect(new Headers(first.headers).get('Authorization')).toBe('Bearer tianji-resource-token')
+    expect(new Headers(second.headers).get('Authorization')).toBe('Bearer tianji-resource-token')
     expect(new Headers(first.headers).get('X-Egon-Tianji-Tenant')).toBe('20')
     expect(String(fetcher.mock.calls[1][0])).toContain('afterSequence=1')
     expect(new Headers(second.headers).get('Last-Event-ID')).toBe('1')
@@ -98,6 +99,18 @@ describe('Agent SSE transport', () => {
       expect(handler).toHaveBeenCalledWith(kind)
       expect(fetcher).toHaveBeenCalledTimes(1)
     })
+
+  it('leaves the epoch intact on 503 and exposes service unavailability', async () => {
+    const handler = vi.fn()
+    setAuthFailureHandler(handler)
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, {status: 503}))
+    vi.stubGlobal('fetch', fetcher)
+    const epoch = gatewayAuth.context.epoch
+    await expect(observe(new AbortController().signal, [])).rejects.toMatchObject({code: 'UNAVAILABLE'})
+    expect(handler).not.toHaveBeenCalled()
+    expect(gatewayAuth.context.epoch).toBe(epoch)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
 
   it('bounds repeated immediate rotation requests', async () => {
     vi.useFakeTimers()

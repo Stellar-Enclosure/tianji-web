@@ -18,15 +18,11 @@ describe('authenticated API client', () => {
     vi.restoreAllMocks()
   })
 
-  it('requires the requested success status for the same JSON and retains browser credentials', async () => {
+  it('requires the requested success status for the same JSON and sends the Tianji Resource Bearer', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json(202, scheduled))
       .mockResolvedValueOnce(json(200, scheduled)).mockResolvedValueOnce(json(200, scheduled))
     vi.stubGlobal('fetch', fetcher)
-    vi.spyOn(gatewayAuth, 'csrf').mockResolvedValue({
-      headerName: 'X-CSRF-TOKEN',
-      token: 'test-csrf',
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    })
+
     const init = {method: 'POST', body: JSON.stringify({commandId: 'node-retry-1'})}
 
     await expect(requestJson(retryPath, '20', init, 202)).resolves.toEqual(scheduled)
@@ -36,9 +32,10 @@ describe('authenticated API client', () => {
     await expect(requestJson(retryPath, '20', init)).resolves.toEqual(scheduled)
     expect(fetcher).toHaveBeenCalledTimes(3)
     for (const [, request] of fetcher.mock.calls) {
-      expect(request).toMatchObject({...init, cache: 'no-store', redirect: 'error', credentials: 'include'})
+      expect(request).toMatchObject({...init, cache: 'no-store', redirect: 'error', credentials: 'omit'})
       const headers = new Headers(request?.headers)
-      expect(headers.get('X-CSRF-TOKEN')).toBe('test-csrf')
+      expect(headers.get('X-CSRF-TOKEN')).toBeNull()
+      expect(headers.get('Authorization')).toBe('Bearer tianji-resource-token')
       expect(headers.get('X-Egon-Tianji-Tenant')).toBe('20')
     }
   })
@@ -61,6 +58,34 @@ describe('authenticated API client', () => {
       status: 401, code: 'NOT_LOGGED_IN',
     })
     expect(onAuthFailure.mock.calls).toEqual([['tenant-changed'], ['unauthenticated']])
+  })
+
+  it('keeps 503 distinct and dispatches a write once', async () => {
+    const handler = vi.fn()
+    setAuthFailureHandler(handler)
+    const fetcher = vi.fn().mockResolvedValue(json(503, {code: 'TIANJI_DEPENDENCY_UNAVAILABLE'}))
+    vi.stubGlobal('fetch', fetcher)
+    const epoch = gatewayAuth.context.epoch
+    await expect(requestJson(retryPath, '20', {method: 'POST'}, 202)).rejects.toMatchObject({
+      status: 503, code: 'TIANJI_DEPENDENCY_UNAVAILABLE',
+    })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(handler).not.toHaveBeenCalled()
+    expect(gatewayAuth.context.epoch).toBe(epoch)
+  })
+
+  it('propagates a caller abort while the resource request is still in flight', async () => {
+    const controller = new AbortController()
+    const fetcher = vi.fn<typeof fetch>((_, request) => new Promise((_resolve, reject) => {
+      const signal = request!.signal!
+      expect(signal.aborted).toBe(false)
+      signal.addEventListener('abort', () => reject(signal.reason), {once: true})
+    }))
+    vi.stubGlobal('fetch', fetcher)
+    const pending = requestJson('/resource', '20', {signal: controller.signal})
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({name: 'AbortError'})
   })
 
   it('isolates response status across concurrent requests', async () => {

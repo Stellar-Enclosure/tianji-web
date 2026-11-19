@@ -39,7 +39,7 @@ const without = <T extends object>(value: T, key: keyof T) => {
   return copy
 }
 
-describe('Worker failure observations through current gateway transport', () => {
+describe('Worker failure observations through the Resource transport', () => {
   beforeEach(() => { gatewayAuth.context.invalidate() })
   afterEach(() => {
     setAuthFailureHandler(() => {})
@@ -52,11 +52,11 @@ describe('Worker failure observations through current gateway transport', () => 
     await rejectsSnapshot(snapshot([], 'another-instance'))
   })
 
-  it('issues only the encoded GET with current tenant, cookie credentials, and caller abort', async () => {
+  it('issues only the encoded GET with current tenant, Resource authorization, and caller abort', async () => {
     const exact = 'expense /+账 %2F'
     const result = snapshot([retry(), manual(), history()], exact)
     const fetcher = mockFetch(json(result))
-    const csrf = vi.spyOn(gatewayAuth, 'csrf')
+
     const controller = new AbortController()
 
     await expect(processWorkerFailuresApi.get('20', exact, controller.signal)).resolves.toEqual(result)
@@ -64,22 +64,20 @@ describe('Worker failure observations through current gateway transport', () => 
     expect(Object.keys(processWorkerFailuresApi)).toEqual(['get'])
     expect(fetcher).toHaveBeenCalledTimes(1)
     const [url, request] = fetcher.mock.calls[0]
-    const prefix = new URL(gatewayAuth.applicationBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
+    const prefix = new URL(gatewayAuth.authority('20').apiBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
     const target = new URL(String(url), 'https://example.test')
     expect(target.pathname).toBe(prefix + '/api/tianji/v1/process-instances/expense%20%2F%2B%E8%B4%A6%20%252F/worker-failures')
     expect(target.search).toBe('')
     expect(target.hash).toBe('')
-    expect(request).toMatchObject({method: 'GET', credentials: 'include', cache: 'no-store', redirect: 'error'})
+    expect(request).toMatchObject({method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'error'})
     expect(request?.body).toBeUndefined()
     const headers = new Headers(request?.headers)
     expect(headers.get('X-Egon-Tianji-Tenant')).toBe('20')
-    expect(headers.get('Authorization')).toBeNull()
+    expect(headers.get('Authorization')).toBe('Bearer tianji-resource-token')
     expect(headers.get('X-CSRF-TOKEN')).toBeNull()
-    expect(csrf).not.toHaveBeenCalled()
     expect(request?.signal).toBeInstanceOf(AbortSignal)
-    expect(request?.signal?.aborted).toBe(false)
-    controller.abort()
     expect(request?.signal?.aborted).toBe(true)
+    expect(controller.signal.aborted).toBe(false)
   })
 
   it('rejects invalid IDs and untrusted tenants before fetch, preserving Java UTF-16 boundaries', async () => {

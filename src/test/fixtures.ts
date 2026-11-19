@@ -1,13 +1,11 @@
 import {snapshotContext, type PermissionSnapshot} from '@stellar-enclosure/stellar-enclosure-web-shared/permissions'
-import type {GatewayIdentityResult} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import type {PublicOAuthIdentity} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {gatewayAuth} from '../auth/gatewayAuth'
 import type {AgentRun} from '../api/agent'
 
-export const identity = (tenantId = '20'): GatewayIdentityResult => ({
+export const identity = (tenantId = '20'): PublicOAuthIdentity => ({
   issuer: `https://idp.example/tenants/${tenantId}`, subject: `subject-${tenantId}`, tenantId,
-  appAlias: 'edge-tianji', clientId: 'tianji-web', authorizationExpiresAt: Math.floor(Date.now() / 1000) + 120,
-  authenticationExpiresAt: Math.floor(Date.now() / 1000) + 120,
-  securityVersion: {realm: '1', client: '1', subject: '1'}, ssoLogoutUri: `https://idp.example/tenants/${tenantId}/logout`,
+  clientId: 'tianji-web', resource: 'https://tianji.example.invalid/resource', accessExpiresAt: Date.now() + 120_000,
 })
 export const snapshot = (tenantId = '20', permissions = ['TIANJI_AGENT_READ', 'TIANJI_AGENT_CANCEL']): PermissionSnapshot => ({
   issuer: `https://idp.example/tenants/${tenantId}`, subject: `subject-${tenantId}`,

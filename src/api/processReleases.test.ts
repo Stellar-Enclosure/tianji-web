@@ -16,7 +16,7 @@ const mockFetch = (value: unknown) => {
   return fetcher
 }
 
-describe('Process release metadata through existing gateway transport', () => {
+describe('Process release metadata through the Resource transport', () => {
   beforeEach(() => gatewayAuth.context.invalidate())
   afterEach(() => {
     gatewayAuth.context.invalidate()
@@ -37,14 +37,14 @@ describe('Process release metadata through existing gateway transport', () => {
     await expect(processReleasesApi.get('20', VERSION, controller.signal)).resolves.toEqual(result)
     expect(fetcher).toHaveBeenCalledTimes(1)
     const [url, init] = fetcher.mock.calls[0]
-    const prefix = new URL(gatewayAuth.applicationBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
+    const prefix = new URL(gatewayAuth.authority('20').apiBaseUrl, 'https://example.test').pathname.replace(/\/$/, '')
     const target = new URL(String(url), 'https://example.test')
     expect(target.pathname).toBe(prefix + '/api/tianji/v1/process-releases/' + VERSION)
     expect(target.search).toBe('')
-    expect(init).toMatchObject({method: 'GET', cache: 'no-store', credentials: 'include', redirect: 'error'})
+    expect(init).toMatchObject({method: 'GET', cache: 'no-store', credentials: 'omit', redirect: 'error'})
     expect(init?.body).toBeUndefined()
     expect(new Headers(init?.headers).get('X-Egon-Tianji-Tenant')).toBe('20')
-    expect(new Headers(init?.headers).get('Authorization')).toBeNull()
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer tianji-resource-token')
     expect(Object.keys(processReleasesApi)).toEqual(['get'])
     controller.abort()
     expect(init?.signal?.aborted).toBe(true)
