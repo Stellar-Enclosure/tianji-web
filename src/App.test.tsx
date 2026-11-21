@@ -1,5 +1,5 @@
 import {act, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
-import type {EnterpriseLayoutConfig} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import type {EnterpriseLayoutConfig, WorkbenchHost, WorkbenchPort} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import type {ReactNode} from 'react'
 import {Link} from 'react-router-dom'
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
@@ -435,5 +435,61 @@ describe('Owned Process correlation routes', () => {
     for (const label of labels) {
       expect(label.defaults).toEqual({'zh-CN': '流程关联查询', 'en-US': 'Process correlation lookup'})
     }
+  })
+})
+
+describe('Tianji workbench-1 embedded host mode', () => {
+  it('reports filtered catalog, omits EnterpriseLayout chrome, and renders owned + legacy handoff routes', async () => {
+    const capturedPorts: WorkbenchPort[] = []
+    const catalogUpdates: Array<{status: string; patterns: string[]}> = []
+    const host: WorkbenchHost = {
+      attach: (port) => {
+        capturedPorts.push(port)
+        return {ok: true}
+      },
+      reportCatalog: (update) => {
+        catalogUpdates.push({
+          status: update.status,
+          patterns: update.pages.map((page) => page.pattern),
+        })
+        return {ok: true}
+      },
+      requestNavigation: () => ({ok: true}),
+    }
+
+    vi.mocked(useAuth).mockReturnValue(auth([processRead, agentRead]))
+    render(<App workbenchHost={host} />)
+
+    await waitFor(() => expect(capturedPorts).toHaveLength(1))
+    await waitFor(() =>
+      expect(catalogUpdates.at(-1)).toEqual({
+        status: 'ready',
+        patterns: ['/operations/process-correlations', '/process-instances', '/runs'],
+      }),
+    )
+
+    expect(screen.queryByRole('navigation', {name: '主导航'})).not.toBeInTheDocument()
+
+    await act(async () => {
+      await capturedPorts[0]!.present({
+        mode: 'show',
+        navigationId: 1,
+        tabKey: '["tianji","tianji.page.runs"]',
+        target: {path: '/runs', search: ''},
+        signal: new AbortController().signal,
+      })
+    })
+    expect(await screen.findByRole('heading', {name: '运行记录'})).toBeInTheDocument()
+
+    await act(async () => {
+      await capturedPorts[0]!.present({
+        mode: 'show',
+        navigationId: 2,
+        tabKey: '["tianji","tianji.legacy.tasks"]',
+        target: {path: '/tasks/task-1', search: ''},
+        signal: new AbortController().signal,
+      })
+    })
+    expect(await screen.findByText('此能力由业务平台提供')).toBeInTheDocument()
   })
 })

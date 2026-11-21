@@ -1,8 +1,15 @@
 import {AppstoreOutlined, AuditOutlined, FileSearchOutlined, FileTextOutlined, FolderOpenOutlined, LogoutOutlined, WarningOutlined} from '@ant-design/icons'
-import {EnterpriseLayout, type EnterpriseLayoutConfig} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {
+  bridgeFail,
+  bridgeOk,
+  EmbeddedWorkbench,
+  EnterpriseLayout,
+  type EnterpriseLayoutConfig,
+  type WorkbenchHost,
+} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Result, Spin, Tag} from 'antd'
-import {useEffect, useState, type ReactNode} from 'react'
-import {createBrowserRouter, Link, matchPath, Navigate, Outlet, Route, RouterProvider, Routes, useLocation, useNavigate} from 'react-router-dom'
+import {useCallback, useEffect, useMemo, useState, type ReactNode} from 'react'
+import {createBrowserRouter, createMemoryRouter, Link, matchPath, Navigate, Outlet, Route, RouterProvider, Routes, useLocation, useNavigate} from 'react-router-dom'
 import {AuthProvider, useAuth} from './auth/AuthContext'
 import {gatewayAuth, LOGIN_CALLBACK, POPUP_CALLBACK} from './auth/gatewayAuth'
 import AgentRunDetailPage from './pages/AgentRunDetailPage'
@@ -15,6 +22,16 @@ import ProcessDefinitionWorkspacePage from './pages/ProcessDefinitionWorkspacePa
 import ProcessDraftEditorPage from './pages/ProcessDraftEditorPage'
 import ProcessInstanceLookupPage from './pages/ProcessInstanceLookupPage'
 import ProcessInstancePage from './pages/ProcessInstancePage'
+import {
+  buildTianjiCatalogPages,
+  canAccessTianjiRoute,
+  matchTianjiRoute,
+} from './workbench/routes'
+
+interface WujieWorkbenchWindow extends Window {
+  $wujie?: {props?: {embedded?: boolean; workbenchHost?: WorkbenchHost}}
+  __WUJIE?: {props?: {workbenchHost?: WorkbenchHost}}
+}
 
 const legacyBookmarks = ['/tasks', '/tasks/:taskId', '/memory'] as const
 const landingPages = [
@@ -35,8 +52,109 @@ export function createConsoleRouter() {
   return createBrowserRouter([{path: '*', element: <ConsoleEntry />}], {basename})
 }
 
-export default function App({router}: {router: ReturnType<typeof createConsoleRouter>}) {
+export default function App({
+  router,
+  workbenchHost,
+}: {
+  readonly router?: ReturnType<typeof createConsoleRouter>
+  readonly workbenchHost?: WorkbenchHost
+}) {
+  const runtimeWindow = window as WujieWorkbenchWindow
+  const resolvedHost = workbenchHost ?? runtimeWindow.$wujie?.props?.workbenchHost ?? runtimeWindow.__WUJIE?.props?.workbenchHost
+  if (resolvedHost) {
+    return <TianjiWorkbenchRouter workbenchHost={resolvedHost} />
+  }
+  if (!router) {
+    throw new Error('Standalone App requires router')
+  }
   return <RouterProvider router={router} />
+}
+
+function TianjiWorkbenchRouter({workbenchHost}: {readonly workbenchHost: WorkbenchHost}) {
+  const [workbenchRouter] = useState(() =>
+    createMemoryRouter(
+      [
+        {
+          path: '/',
+          element: (
+            <AuthProvider>
+              <TianjiWorkbenchBridge workbenchHost={workbenchHost} />
+            </AuthProvider>
+          ),
+          errorElement: <Result status="error" title="页面加载失败" />,
+          children: [
+            {path: '__workbench/idle', element: null},
+            {path: 'process-definitions', element: <RequireResource resource="tianji.page.processDefinitions"><ProcessDefinitionWorkspacePage /></RequireResource>},
+            {path: 'process-definitions/new', element: <RequireResource resource="tianji.page.processDefinitions"><ProcessDefinitionWorkspacePage /></RequireResource>},
+            {path: 'process-definitions/drafts/:draftId', element: <RequireResource resource="tianji.page.processDraftEditor"><ProcessDraftEditorPage /></RequireResource>},
+            {path: 'process-instances', element: <RequireResource resource="tianji.page.processInstances"><ProcessInstanceLookupPage /></RequireResource>},
+            {path: 'process-instances/:instanceId', element: <RequireResource resource="tianji.page.processInstance"><ProcessInstancePage /></RequireResource>},
+            {path: 'runs', element: <RequireResource resource="tianji.page.runs"><AgentRunsPage /></RequireResource>},
+            {path: 'runs/:runId', element: <RequireResource resource="tianji.page.runDetail"><AgentRunDetailPage /></RequireResource>},
+            {path: 'cases', element: <RequireResource resource="tianji.page.cases"><CaseDetailPage /></RequireResource>},
+            {path: 'cases/:caseInstanceId', element: <RequireResource resource="tianji.page.caseDetail"><CaseDetailPage /></RequireResource>},
+            {path: 'operations/worker-failures', element: <RequireResource resource="tianji.page.workerFailures"><WorkerFailuresPage /></RequireResource>},
+            {path: 'operations/process-releases', element: <RequireResource resource="tianji.page.processReleases"><DefinitionReleasePage /></RequireResource>},
+            {path: 'operations/process-correlations', element: <RequireResource resource="tianji.page.processCorrelations"><ExecutionTimelinePage /></RequireResource>},
+            {path: 'tasks', element: <LegacyBusinessHandoff />},
+            {path: 'tasks/:taskId', element: <LegacyBusinessHandoff />},
+            {path: 'memory', element: <LegacyBusinessHandoff />},
+            {path: '*', element: <Result status="404" title="页面不存在" />},
+          ],
+        },
+      ],
+      {initialEntries: ['/__workbench/idle']},
+    ),
+  )
+
+  return <RouterProvider router={workbenchRouter} />
+}
+
+function TianjiWorkbenchBridge({workbenchHost}: {readonly workbenchHost: WorkbenchHost}) {
+  const {status, authorization, allows} = useAuth()
+  const navigate = useNavigate()
+
+  const pages = useMemo(() => {
+    if (!authorization) return []
+    return buildTianjiCatalogPages({allows})
+  }, [allows, authorization])
+
+  const catalogStatus = useMemo(() => {
+    if (status === 'loading') return 'authorizing' as const
+    if (status === 'error') return 'failed' as const
+    if (status === 'ready') return 'ready' as const
+    return 'denied' as const
+  }, [status])
+
+  const handlePresent = useCallback(async (presentation: Parameters<
+    NonNullable<Parameters<typeof EmbeddedWorkbench>[0]['onPresent']>
+  >[0]) => {
+    if (presentation.mode !== 'show') {
+      return bridgeOk()
+    }
+    const matched = matchTianjiRoute(presentation.target.path)
+    if (!matched) {
+      return bridgeFail('NOT_FOUND')
+    }
+    if (!matched.route.legacyHandoff && !canAccessTianjiRoute({allows}, matched.route)) {
+      return bridgeFail('DENIED')
+    }
+    await navigate(`${presentation.target.path}${presentation.target.search ?? ''}`, {replace: true})
+    return bridgeOk()
+  }, [allows, navigate])
+
+  return (
+    <EmbeddedWorkbench
+      host={workbenchHost}
+      status={catalogStatus}
+      pages={pages}
+      onPresent={handlePresent}
+    >
+      <div className="tianji-workbench-outlet" style={{width: '100%', minWidth: 0}}>
+        <Outlet />
+      </div>
+    </EmbeddedWorkbench>
+  )
 }
 
 function ConsoleEntry() {
