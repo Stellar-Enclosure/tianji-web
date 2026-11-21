@@ -1,5 +1,10 @@
 import {Alert, Button, Input, Select, Space, Table, Tag, Typography, type TableColumnsType} from 'antd'
-import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {
+  ApiError,
+  WorkspaceList,
+  useEmbeddedWorkbench,
+  useWorkbenchLeaveGuard,
+} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
 import {Link, useLocation, useNavigate} from 'react-router-dom'
 import {processDraftsApi, type DraftState, type DraftSummaryDTO, type ListProcessDraftsQuery,
@@ -196,6 +201,15 @@ function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate
     navigate(location.pathname, {replace: true, state: null})
   }, [copyFrom, location.pathname, navigate])
   const canStart = canView && startEnabled
+  const {embedded, activeTabKey} = useEmbeddedWorkbench()
+  useWorkbenchLeaveGuard(activeTabKey ?? 'tianji:process-definitions', {
+    dirty: Boolean(recovery || startPointer),
+    pendingMutation: recoveryState === 'dispatching'
+      || recoveryState === 'checking'
+      || startState === 'preparing'
+      || startState === 'checking'
+      || startState === 'sending',
+  })
 
   useLayoutEffect(() => {
     alive.current = true
@@ -607,12 +621,14 @@ function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate
   if (!canView) return <Alert type="warning" showIcon message="当前身份不能访问草稿工作区。" />
   if (!isWorkspace) return null
 
-  return <section aria-labelledby="process-definition-workspace-heading" className="page-stack">
+  return <section aria-labelledby={embedded ? undefined : 'process-definition-workspace-heading'} aria-label={embedded ? '流程设计' : undefined} className="page-stack">
     <header className="page-heading">
-      <div>
-        <Typography.Title level={2} id="process-definition-workspace-heading">流程设计</Typography.Title>
-        <Typography.Text type="secondary">查看和恢复当前身份创建的流程草稿。</Typography.Text>
-      </div>
+      {!embedded && (
+        <div>
+          <Typography.Title level={2} id="process-definition-workspace-heading">流程设计</Typography.Title>
+          <Typography.Text type="secondary">查看和恢复当前身份创建的流程草稿。</Typography.Text>
+        </div>
+      )}
       <Space>
         {isNew && <Button onClick={() => { setLoading(true); navigate('/process-definitions') }}>返回工作区</Button>}
         {!isNew && canCreate && <Button type="primary" onClick={() => navigate('/process-definitions/new')}>新建草稿</Button>}
@@ -724,42 +740,52 @@ function OwnerDraftWorkspace({tenant, issuer, subject, epoch, canView, canCreate
         </Space>
       </div>
     </section> : <>
-      <section aria-label="草稿筛选" className="surface-card">
-        <Space wrap align="end">
-          <label htmlFor="draft-filter-definition">流程定义</label>
-          <Input id="draft-filter-definition" autoComplete="off" maxLength={128} value={filterDefinition}
-            onChange={event => setFilterDefinition(event.target.value)} />
-          <label htmlFor="draft-filter-state">状态</label>
-          <Select id="draft-filter-state" aria-label="状态" value={filterState} style={{minWidth: 150}}
-            options={STATES.map(state => ({value: state, label: state}))}
-            onChange={(state: DraftState) => setFilterState(state)} />
-          <Button aria-label="筛选" onClick={applyFilters}>应用筛选</Button>
-        </Space>
-      </section>
-
       {filterError && <Alert type="error" showIcon message={filterError} />}
-      {listFailure && <Alert type="error" showIcon message="暂时无法读取草稿列表。"
-        action={<Button onClick={() => {
-          setDraftPage(undefined)
-          setPageCursor(undefined)
-          setPreviousCursors([])
-          setListFailure(false)
-          setLoading(true)
-          setFilters(current => ({...current}))
-        }}>
-          重试
-        </Button>} />}
-      {loading && <div role="status">正在读取草稿</div>}
-      {!loading && !listFailure && draftPage?.items.length === 0
-        && <Alert type="info" showIcon message="还没有草稿" description="新建草稿后，可在这里继续编辑或恢复未完成的工作。" />}
-      {!loading && !listFailure && !!draftPage?.items.length
-        && <Table<DraftSummaryDTO> rowKey="draftId" dataSource={[...draftPage.items]} columns={columns} pagination={false}
-          scroll={{x: 760}} />}
-      {!loading && !listFailure && draftPage && (previousCursors.length > 0 || draftPage.nextCursor !== null)
-        && <Space>
-          <Button onClick={goPrevious} disabled={previousCursors.length === 0}>上一页</Button>
-          <Button onClick={goNext} disabled={!draftPage.nextCursor}>下一页</Button>
-        </Space>}
+      <WorkspaceList
+        ariaLabel="流程草稿列表"
+        filters={(
+          <Space wrap align="end">
+            <label htmlFor="draft-filter-definition">流程定义</label>
+            <Input id="draft-filter-definition" autoComplete="off" maxLength={128} value={filterDefinition}
+              onChange={event => setFilterDefinition(event.target.value)} />
+            <label htmlFor="draft-filter-state">状态</label>
+            <Select id="draft-filter-state" aria-label="状态" value={filterState} style={{minWidth: 150}}
+              options={STATES.map(state => ({value: state, label: state}))}
+              onChange={(state: DraftState) => setFilterState(state)} />
+            <Button aria-label="筛选" onClick={applyFilters}>应用筛选</Button>
+          </Space>
+        )}
+        pageState={{
+          loading,
+          error: listFailure ? new Error('暂时无法读取草稿列表。') : null,
+          empty: !loading && !listFailure && draftPage?.items.length === 0,
+          emptyDescription: '还没有草稿',
+          onRetry: () => {
+            setDraftPage(undefined)
+            setPageCursor(undefined)
+            setPreviousCursors([])
+            setListFailure(false)
+            setLoading(true)
+            setFilters(current => ({...current}))
+          },
+        }}
+        table={(
+          <Table<DraftSummaryDTO> rowKey="draftId" dataSource={draftPage?.items ? [...draftPage.items] : []} columns={columns} pagination={false}
+            scroll={{x: 760}} />
+        )}
+        pagination={
+          draftPage && (previousCursors.length > 0 || draftPage.nextCursor !== null)
+            ? {
+                mode: 'cursor',
+                hasMore: draftPage.nextCursor !== null,
+                hasPrevious: previousCursors.length > 0,
+                loadingMore: loading,
+                onNext: goNext,
+                onPrevious: goPrevious,
+              }
+            : undefined
+        }
+      />
     </>}
   </section>
 }

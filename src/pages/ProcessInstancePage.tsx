@@ -1,4 +1,8 @@
-import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {
+  ApiError,
+  useEmbeddedWorkbench,
+  useWorkbenchLeaveGuard,
+} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {allowsSnapshotRequirement} from '@stellar-enclosure/stellar-enclosure-web-shared/permissions'
 import {Alert, Button, Descriptions, Input, Modal, Space, Tag, Typography} from 'antd'
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react'
@@ -422,9 +426,15 @@ function InstanceObservation({tenant, issuer, subject, instanceId, epoch, canCan
   const snapshot = observation.phase === 'instance' ? observation.snapshot : undefined
   const stale = observation.phase === 'instance' && observation.stale
 
+  const {embedded, activeTabKey} = useEmbeddedWorkbench()
+  useWorkbenchLeaveGuard(activeTabKey ?? `tianji:process-instance:${instanceId}`, {
+    dirty: false,
+    pendingMutation: cancelBusy || pendingIntent !== undefined,
+  })
+
   if (observation.phase === 'loading' && !snapshot) {
-    return <section aria-labelledby="process-instance-title" className="page-stack">
-      <Typography.Title id="process-instance-title" level={2}>流程实例</Typography.Title>
+    return <section aria-labelledby={embedded ? undefined : 'process-instance-title'} aria-label={embedded ? '流程实例' : undefined} className="page-stack">
+      {!embedded && <Typography.Title id="process-instance-title" level={2}>流程实例</Typography.Title>}
       <div role="status">正在读取流程实例</div>
     </section>
   }
@@ -432,9 +442,9 @@ function InstanceObservation({tenant, issuer, subject, instanceId, epoch, canCan
     return <Alert type="warning" showIcon title={observation.message} />
   }
   if (!snapshot) {
-    return <section aria-labelledby="process-instance-title" className="page-stack">
+    return <section aria-labelledby={embedded ? undefined : 'process-instance-title'} aria-label={embedded ? '流程实例' : undefined} className="page-stack">
       <div className="page-heading">
-        <div><Typography.Title id="process-instance-title" level={2}>流程实例</Typography.Title></div>
+        {!embedded && <div><Typography.Title id="process-instance-title" level={2}>流程实例</Typography.Title></div>}
         <Link to="/process-instances">返回实例查找</Link>
       </div>
       <Alert type="warning" showIcon title={observation.phase === 'error' ? observation.message : '当前无法观察该流程实例。'} />
@@ -442,12 +452,14 @@ function InstanceObservation({tenant, issuer, subject, instanceId, epoch, canCan
     </section>
   }
 
-  return <section aria-labelledby="process-instance-title" className="page-stack">
+  return <section aria-labelledby={embedded ? undefined : 'process-instance-title'} aria-label={embedded ? '流程实例' : undefined} className="page-stack">
     <header className="page-heading">
-      <div>
-        <Typography.Title id="process-instance-title" level={2}>流程实例</Typography.Title>
-        <Typography.Text type="secondary">查看固定发布版本与当前授权的节点执行状态。</Typography.Text>
-      </div>
+      {!embedded && (
+        <div>
+          <Typography.Title id="process-instance-title" level={2}>流程实例</Typography.Title>
+          <Typography.Text type="secondary">查看固定发布版本与当前授权的节点执行状态。</Typography.Text>
+        </div>
+      )}
       <Space wrap>
         <Tag color={snapshot.state === 'ACTIVE' ? 'processing' : snapshot.state === 'COMPLETED' ? 'success' : 'default'}>
           {STATUS_LABELS[snapshot.state]}

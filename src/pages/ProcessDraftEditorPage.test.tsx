@@ -1,5 +1,5 @@
 import {act, fireEvent, render, screen, waitFor} from '@testing-library/react'
-import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {ApiError, EmbeddedWorkbench, type WorkbenchHost, type WorkbenchPort} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {createMemoryRouter, RouterProvider} from 'react-router-dom'
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 import type {DraftContentVO, DraftPublicationVO, DraftValidationResultDTO, ProcessDraftDTO} from '../api/processDrafts'
@@ -387,5 +387,50 @@ describe('Process draft editor', () => {
     expect(get).not.toHaveBeenCalled()
     expect(save).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', {name: '暂存修订 4'})).not.toBeInTheDocument()
+  })
+
+  it('reports dirty draft edits to EmbeddedWorkbench leave guard across close and logout checks', async () => {
+    const capturedPorts: WorkbenchPort[] = []
+    const host: WorkbenchHost = {
+      attach: port => { capturedPorts.push(port); return {ok: true} },
+      reportCatalog: () => ({ok: true}),
+      requestNavigation: () => ({ok: true}),
+    }
+    const tabKey = '["tianji","tianji.page.processDraftEditor","pd-1"]'
+    const router = createMemoryRouter([
+      {
+        path: '/process-definitions/drafts/:draftId',
+        element: (
+          <EmbeddedWorkbench host={host} status="ready" pages={[]} onPresent={async () => ({ok: true as const})}>
+            <ProcessDraftEditorPage />
+          </EmbeddedWorkbench>
+        ),
+      },
+    ], {initialEntries: [`/process-definitions/drafts/${draftId}`]})
+
+    render(<RouterProvider router={router} />)
+    await waitFor(() => expect(capturedPorts).toHaveLength(1))
+    await act(async () => {
+      await capturedPorts[0]!.present({
+        mode: 'show',
+        navigationId: 1,
+        tabKey,
+        target: {path: `/process-definitions/drafts/${draftId}`, search: ''},
+        signal: new AbortController().signal,
+      })
+    })
+
+    expect(await screen.findByLabelText('草稿标题')).toHaveValue('Order flow')
+    expect(capturedPorts[0]!.checkLeave({reason: 'close', tabKey})).toEqual(
+      expect.objectContaining({ok: true, dirty: false}),
+    )
+
+    fireEvent.change(screen.getByLabelText('草稿标题'), {target: {value: 'Edited embedded title'}})
+    expect(capturedPorts[0]!.checkLeave({reason: 'close', tabKey})).toEqual(
+      expect.objectContaining({ok: true, dirty: true}),
+    )
+    expect(capturedPorts[0]!.checkLeave({reason: 'logout'})).toEqual(
+      expect.objectContaining({ok: true, dirty: true}),
+    )
   })
 })

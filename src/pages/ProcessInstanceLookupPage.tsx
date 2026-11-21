@@ -1,3 +1,4 @@
+import {useEmbeddedWorkbench} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Form, Input, Typography} from 'antd'
 import {useState} from 'react'
 import {useNavigate} from 'react-router-dom'
@@ -10,6 +11,7 @@ const INVALID_ID = '请输入有效的流程实例标识。'
 type LookupForm = {instanceId: string}
 
 export default function ProcessInstanceLookupPage() {
+  const {embedded} = useEmbeddedWorkbench()
   const {status, authorization, allows} = useAuth()
   const navigate = useNavigate()
   const [form] = Form.useForm<LookupForm>()
@@ -31,13 +33,15 @@ export default function ProcessInstanceLookupPage() {
     navigate('/process-instances/' + encodeURIComponent(instanceId))
   }
 
-  return <section aria-labelledby="process-instance-lookup-title" className="page-stack">
-    <div className="page-heading">
-      <div>
-        <Typography.Title id="process-instance-lookup-title" level={2}>流程实例查找</Typography.Title>
-        <Typography.Text type="secondary">输入已知实例标识，查看当前身份可访问的流程运行。</Typography.Text>
+  return <section aria-labelledby={embedded ? undefined : 'process-instance-lookup-title'} aria-label={embedded ? '流程实例查找' : undefined} className="page-stack">
+    {!embedded && (
+      <div className="page-heading">
+        <div>
+          <Typography.Title id="process-instance-lookup-title" level={2}>流程实例查找</Typography.Title>
+          <Typography.Text type="secondary">输入已知实例标识，查看当前身份可访问的流程运行。</Typography.Text>
+        </div>
       </div>
-    </div>
+    )}
     <Card variant="borderless" className="surface-card" title="查询流程实例">
       <Form form={form} layout="vertical" initialValues={{instanceId: ''}}
         onValuesChange={() => {

@@ -1,4 +1,4 @@
-import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {ApiError, useEmbeddedWorkbench} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Form, Input, Space, Table, Typography, type TableColumnsType} from 'antd'
 import {useLayoutEffect, useRef, useState, type FormEvent} from 'react'
 import {Link} from 'react-router-dom'
@@ -65,6 +65,7 @@ export default function ExecutionTimelinePage() {
 }
 
 function ProcessCorrelationLookup({tenant}: {tenant: string}) {
+  const {embedded} = useEmbeddedWorkbench()
   const {allows} = useAuth()
   const currentAllows = useRef(allows)
   const [form] = Form.useForm<LookupForm>()
@@ -179,13 +180,15 @@ function ProcessCorrelationLookup({tenant}: {tenant: string}) {
       <Button onClick={() => void openDetail(row)}>查看详情</Button>},
   ]
 
-  return <section aria-labelledby="process-correlations-title" className="page-stack">
-    <div className="page-heading">
-      <div>
-        <Typography.Title id="process-correlations-title" level={2}>流程关联查询</Typography.Title>
-        <Typography.Text type="secondary">查询当前身份启动的流程回执，按需读取单个流程实例详情。</Typography.Text>
+  return <section aria-labelledby={embedded ? undefined : 'process-correlations-title'} aria-label={embedded ? '流程关联查询' : undefined} className="page-stack">
+    {!embedded && (
+      <div className="page-heading">
+        <div>
+          <Typography.Title id="process-correlations-title" level={2}>流程关联查询</Typography.Title>
+          <Typography.Text type="secondary">查询当前身份启动的流程回执，按需读取单个流程实例详情。</Typography.Text>
+        </div>
       </div>
-    </div>
+    )}
     <Card variant="borderless" className="surface-card" title="查询流程关联">
       <Form form={form} layout="vertical" initialValues={{correlationId: '', fromInclusive: '', toExclusive: ''}}
         onValuesChange={edit} onFinish={submit} onFinishFailed={({errorFields}) => {

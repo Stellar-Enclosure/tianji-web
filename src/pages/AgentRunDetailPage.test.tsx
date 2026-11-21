@@ -1,4 +1,5 @@
 import {act, fireEvent, render, screen, waitFor} from '@testing-library/react'
+import {EmbeddedWorkbench, type WorkbenchHost, type WorkbenchPort} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {MemoryRouter, Route, Routes} from 'react-router-dom'
 import {beforeEach, describe, expect, it, vi} from 'vitest'
 import {agentApi, type AgentResult, type AgentResultUsage} from '../api/agent'
@@ -315,5 +316,74 @@ describe('Agent run detail', () => {
     expect(agentApi.get).toHaveBeenCalledWith('20', 'run-1', expect.any(AbortSignal))
     expect(agentApi.result).toHaveBeenCalledWith('20', 'run-1', expect.any(AbortSignal))
     expect(observeAgentRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('pauses SSE stream when suspended in EmbeddedWorkbench and resumes from checkpointed sequence without duplicates', async () => {
+    vi.mocked(agentApi.get).mockResolvedValue(run('run-sse-resume'))
+    const calls: Array<{afterSequence: number | null | undefined; signal: AbortSignal; onEvent: Parameters<typeof observeAgentRun>[0]['onEvent']}> = []
+    vi.mocked(observeAgentRun).mockImplementation(options => {
+      calls.push({afterSequence: options.afterSequence, signal: options.signal, onEvent: options.onEvent})
+      return new Promise(resolve => options.signal.addEventListener('abort', () => resolve(), {once: true}))
+    })
+    const capturedPorts: WorkbenchPort[] = []
+    const host: WorkbenchHost = {
+      attach: port => { capturedPorts.push(port); return {ok: true} },
+      reportCatalog: () => ({ok: true}),
+      requestNavigation: () => ({ok: true}),
+    }
+    const tabKey = '["tianji","tianji.page.runDetail","run-sse-resume"]'
+
+    render(
+      <MemoryRouter initialEntries={['/runs/run-sse-resume']}>
+        <EmbeddedWorkbench host={host} status="ready" pages={[]} onPresent={async () => ({ok: true as const})}>
+          <Routes><Route path="/runs/:runId" element={<AgentRunDetailPage />} /></Routes>
+        </EmbeddedWorkbench>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(capturedPorts).toHaveLength(1))
+    await act(async () => {
+      await capturedPorts[0]!.present({
+        mode: 'show',
+        navigationId: 1,
+        tabKey,
+        target: {path: '/runs/run-sse-resume', search: ''},
+        signal: new AbortController().signal,
+      })
+    })
+    await waitFor(() => expect(calls).toHaveLength(1))
+
+    await act(async () => {
+      calls[0]!.onEvent({...testEvent(3, 'RUN_STATUS_CHANGED', {status: 'RUNNING'}), runId: 'run-sse-resume'})
+    })
+    expect(await screen.findByText('#3 RUN_STATUS_CHANGED')).toBeInTheDocument()
+
+    await act(async () => {
+      await capturedPorts[0]!.present({
+        mode: 'suspend',
+        navigationId: 2,
+        signal: new AbortController().signal,
+      })
+    })
+    expect(calls[0]!.signal.aborted).toBe(true)
+
+    await act(async () => {
+      await capturedPorts[0]!.present({
+        mode: 'show',
+        navigationId: 3,
+        tabKey,
+        target: {path: '/runs/run-sse-resume', search: ''},
+        signal: new AbortController().signal,
+      })
+    })
+    await waitFor(() => expect(calls).toHaveLength(2))
+    expect(calls[1]!.afterSequence).toBe(3)
+
+    await act(async () => {
+      calls[1]!.onEvent({...testEvent(3, 'RUN_STATUS_CHANGED', {status: 'RUNNING'}), runId: 'run-sse-resume'})
+      calls[1]!.onEvent({...testEvent(4, 'RUN_STATUS_CHANGED', {status: 'RUNNING'}), runId: 'run-sse-resume'})
+    })
+    expect(screen.getAllByText('#3 RUN_STATUS_CHANGED')).toHaveLength(1)
+    expect(screen.getByText('#4 RUN_STATUS_CHANGED')).toBeInTheDocument()
   })
 })

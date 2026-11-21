@@ -1,4 +1,9 @@
-import {ApiError, type PublicOAuthIdentity} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {
+  ApiError,
+  useEmbeddedWorkbench,
+  useWorkbenchLeaveGuard,
+  type PublicOAuthIdentity,
+} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Descriptions, Empty, Space, Spin, Tag, Typography} from 'antd'
 import {useCallback, useEffect, useRef, useState} from 'react'
 import {Link, useParams} from 'react-router-dom'
@@ -38,6 +43,8 @@ export default function AgentRunDetailPage() {
 }
 
 function AgentRunDetailContent({runId, identity}: {runId: string; identity: PublicOAuthIdentity}) {
+  const {embedded, active, activeTabKey} = useEmbeddedWorkbench()
+  const streamEnabled = !embedded || active
   const tenant = identity.tenantId
   const {allows} = useAuth()
   const [run, setRun] = useState<AgentRun>()
@@ -53,7 +60,13 @@ function AgentRunDetailContent({runId, identity}: {runId: string; identity: Publ
   const [cancelMessage, setCancelMessage] = useState<string>()
   const mutation = useRef<AbortController | null>(null)
   const refreshSequence = useRef(0)
+  const seenSequences = useRef(new Set<number>())
   const lifetime = useRef<AbortController | null>(null)
+
+  useWorkbenchLeaveGuard(activeTabKey ?? `tianji:run:${runId}`, {
+    dirty: false,
+    pendingMutation: cancelling,
+  })
 
   const refresh = useCallback(async (signal: AbortSignal) => {
     const serial = ++refreshSequence.current
@@ -69,7 +82,7 @@ function AgentRunDetailContent({runId, identity}: {runId: string; identity: Publ
   useEffect(() => {
     const controller = new AbortController()
     lifetime.current = controller
-    if (!isRunId(runId)) return () => controller.abort()
+    if (!isRunId(runId) || !streamEnabled) return () => controller.abort()
     let checkpoint: Awaited<ReturnType<typeof openAgentEventCheckpoint>> | undefined
     void (async () => {
       checkpoint = await openAgentEventCheckpoint(identity, runId)
@@ -79,6 +92,8 @@ function AgentRunDetailContent({runId, identity}: {runId: string; identity: Publ
         onState: setConnection,
         onEvent: event => {
           checkpoint?.advance(event.sequence)
+          if (seenSequences.current.has(event.sequence)) return
+          seenSequences.current.add(event.sequence)
           setEvents(previous => [...previous, visible(event)].slice(-200))
           if ((event.type === 'TEXT_DELTA' || event.type === 'AGENT_OUTPUT') && typeof event.payload.text === 'string') {
             const author = event.author ?? 'Agent'
@@ -129,7 +144,7 @@ function AgentRunDetailContent({runId, identity}: {runId: string; identity: Publ
       refreshSequence.current += 1
       if (lifetime.current === controller) lifetime.current = null
     }
-  }, [runId, tenant, identity, refresh, reload])
+  }, [runId, tenant, identity, refresh, reload, streamEnabled])
 
   const sendCancellation = async (command: CancelCommand) => {
     if (mutation.current) return
@@ -180,6 +195,7 @@ function AgentRunDetailContent({runId, identity}: {runId: string; identity: Publ
   }
 
   const reloadDetails = () => {
+    seenSequences.current.clear()
     setRun(undefined)
     setResult(undefined)
     setEvents([])
@@ -191,10 +207,12 @@ function AgentRunDetailContent({runId, identity}: {runId: string; identity: Publ
   }
   const displayError = isRunId(runId) ? error : '运行标识无效。'
 
-  return <section aria-labelledby="detail-title" className="page-stack">
+  return <section aria-labelledby={embedded ? undefined : 'detail-title'} aria-label={embedded ? '运行详情' : undefined} className="page-stack">
     <div className="page-heading">
-      <div><Typography.Text type="secondary"><Link to="/runs">运行记录</Link> / 详情</Typography.Text>
-        <Typography.Title id="detail-title" level={2}>运行详情</Typography.Title></div>
+      {!embedded && (
+        <div><Typography.Text type="secondary"><Link to="/runs">运行记录</Link> / 详情</Typography.Text>
+          <Typography.Title id="detail-title" level={2}>运行详情</Typography.Title></div>
+      )}
       <Space><Button onClick={reloadDetails} disabled={cancelling}>刷新</Button>
         {run && run.runId === runId && !isTerminal(run.status) && allows('tianji.button.runDetail.cancel') &&
           <Button danger onClick={cancel} loading={cancelling} disabled={run.cancelRequested && !cancelPending}>

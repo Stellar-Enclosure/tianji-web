@@ -1,4 +1,4 @@
-import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {ApiError, useEmbeddedWorkbench} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Form, Input, Select, Space, Table, Tag, Typography,
   type TableColumnsType} from 'antd'
 import {useLayoutEffect, useRef, useState} from 'react'
@@ -119,6 +119,7 @@ export default function DefinitionReleasePage() {
 }
 
 function ProcessReleaseLookup({tenant}: {tenant: string}) {
+  const {embedded} = useEmbeddedWorkbench()
   const {allows} = useAuth()
   const currentAllows = useRef(allows)
   const [form] = Form.useForm<LookupForm>()
@@ -206,15 +207,17 @@ function ProcessReleaseLookup({tenant}: {tenant: string}) {
     }
   }
 
-  return <section aria-labelledby="process-release-title" className="page-stack">
-    <div className="page-heading">
-      <div>
-        <Typography.Title id="process-release-title" level={2}>流程发布元数据</Typography.Title>
-        <Typography.Text type="secondary">{mode === 'v1'
-          ? '输入已知发布版本，查看传统流程模型元数据。填写对比版本可查看差异。'
-          : '输入已知发布版本，查看固定的 V2 模型源、生效状态与技术流程图。'}</Typography.Text>
+  return <section aria-labelledby={embedded ? undefined : 'process-release-title'} aria-label={embedded ? '流程发布元数据' : undefined} className="page-stack">
+    {!embedded && (
+      <div className="page-heading">
+        <div>
+          <Typography.Title id="process-release-title" level={2}>流程发布元数据</Typography.Title>
+          <Typography.Text type="secondary">{mode === 'v1'
+            ? '输入已知发布版本，查看传统流程模型元数据。填写对比版本可查看差异。'
+            : '输入已知发布版本，查看固定的 V2 模型源、生效状态与技术流程图。'}</Typography.Text>
+        </div>
       </div>
-    </div>
+    )}
     <Card variant="borderless" className="surface-card" title="查询流程发布">
       <Space direction="vertical" size="middle" className="full-width">
         <div>

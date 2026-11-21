@@ -1,4 +1,8 @@
-import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {
+  ApiError,
+  useEmbeddedWorkbench,
+  useWorkbenchLeaveGuard,
+} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Form, Input, Modal, Space, Table, Tag, Timeline, Typography} from 'antd'
 import {useCallback, useEffect, useReducer, useRef, useState} from 'react'
 import {Link, useNavigate, useParams} from 'react-router-dom'
@@ -154,10 +158,18 @@ function CaseDetailContent({tenant, caseInstanceId, readResource}: {tenant: stri
         <time dateTime={current.finishedAt}>{utc.format(new Date(current.finishedAt))} UTC</time></Space>},
   ] : []
 
-  return <section aria-labelledby="case-detail-title" className="page-stack">
+  const {embedded, activeTabKey} = useEmbeddedWorkbench()
+  useWorkbenchLeaveGuard(activeTabKey ?? `tianji:case:${caseInstanceId ?? 'lookup'}`, {
+    dirty: false,
+    pendingMutation: state.phase === 'submitting' || state.phase === 'unknown',
+  })
+
+  return <section aria-labelledby={embedded ? undefined : 'case-detail-title'} aria-label={embedded ? (caseInstanceId === undefined ? '案件查询' : '案件详情') : undefined} className="page-stack">
     <div className="page-heading">
-      <div><Typography.Title id="case-detail-title" level={2}>{caseInstanceId === undefined ? '案件查询' : '案件详情'}</Typography.Title>
-        <Typography.Text type="secondary">按已获授权的案件标识读取当前事实；实际动作资格由服务器再次核对。</Typography.Text></div>
+      {!embedded && (
+        <div><Typography.Title id="case-detail-title" level={2}>{caseInstanceId === undefined ? '案件查询' : '案件详情'}</Typography.Title>
+          <Typography.Text type="secondary">按已获授权的案件标识读取当前事实；实际动作资格由服务器再次核对。</Typography.Text></div>
+      )}
       <Space>
         {!frozen && caseInstanceId !== undefined && allows(LOOKUP) && <Link to="/cases">返回案件查询</Link>}
         <Button disabled={caseInstanceId === undefined || reading || frozen} onClick={() => {

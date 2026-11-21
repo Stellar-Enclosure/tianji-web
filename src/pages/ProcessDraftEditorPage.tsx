@@ -1,4 +1,8 @@
-import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {
+  ApiError,
+  useEmbeddedWorkbench,
+  useWorkbenchLeaveGuard,
+} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Checkbox, Descriptions, Divider, Empty, Input, Modal, Select, Space, Spin, Tag, Typography} from 'antd'
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
 import {useBlocker, useBeforeUnload, useNavigate, useParams} from 'react-router-dom'
@@ -144,6 +148,7 @@ function DraftEditor({draftId, tenantId, issuer, subject, epoch}: {
   subject: string
   epoch: number
 }) {
+  const {embedded, activeTabKey} = useEmbeddedWorkbench()
   const {allows} = useAuth()
   const navigate = useNavigate()
   const currentAllows = useRef(allows)
@@ -187,6 +192,13 @@ function DraftEditor({draftId, tenantId, issuer, subject, epoch}: {
     && pending?.operation !== 'PUBLISH' && pending?.operation !== 'DISCARD'
   const dirty = currentDraft !== undefined && draftBuffer !== undefined && !bufferMatchesDraft(draftBuffer, currentDraft)
   const canLeave = dirty || pending !== undefined
+  useWorkbenchLeaveGuard(activeTabKey ?? `tianji:draft:${draftId}`, {
+    dirty,
+    pendingMutation: pending !== undefined
+      || mutationState === 'saving'
+      || mutationState === 'publishing'
+      || mutationState === 'discarding',
+  })
   const blocker = useBlocker(({currentLocation, nextLocation}) => alive.current
     && gatewayAuth.context.epoch === epoch && !allowNextNavigation.current && canLeave
     && currentLocation.pathname !== nextLocation.pathname)
@@ -783,12 +795,14 @@ function DraftEditor({draftId, tenantId, issuer, subject, epoch}: {
   </section>
 
   const stateLabel = currentDraft?.state === 'PUBLISHED' ? '已发布封存' : currentDraft?.state === 'DISCARDED' ? '已放弃' : '编辑中'
-  return <section className="page-stack process-draft-editor" aria-labelledby="process-draft-editor-title">
+  return <section className="page-stack process-draft-editor" aria-labelledby={embedded ? undefined : 'process-draft-editor-title'} aria-label={embedded ? '编辑流程草稿' : undefined}>
     <header className="page-heading">
-      <div>
-        <Typography.Title id="process-draft-editor-title" level={2}>编辑流程草稿</Typography.Title>
-        <Typography.Text type="secondary">{currentDraft?.definitionKey} · 服务端草稿修订独立递增。</Typography.Text>
-      </div>
+      {!embedded && (
+        <div>
+          <Typography.Title id="process-draft-editor-title" level={2}>编辑流程草稿</Typography.Title>
+          <Typography.Text type="secondary">{currentDraft?.definitionKey} · 服务端草稿修订独立递增。</Typography.Text>
+        </div>
+      )}
       <Space wrap>
         <Tag color={currentDraft?.state === 'EDITING' ? 'processing' : 'default'}>{stateLabel}</Tag>
         <Button onClick={() => void queryCurrent()} aria-label="重新读取服务器稿" aria-busy={mutationState === 'reading'}

@@ -1,16 +1,38 @@
-import {describe, expect, it} from 'vitest'
+import {cleanup, render, screen, waitFor} from '@testing-library/react'
+import {createElement, type ReactNode} from 'react'
+import {MemoryRouter, Route, Routes} from 'react-router-dom'
+import {afterEach, describe, expect, it, vi} from 'vitest'
 import {
+  EmbeddedWorkbench,
   validatePageDescriptor,
   validateRelativeRoutePath,
+  type WorkbenchHost,
 } from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {agentApi} from '../api/agent'
+import {AuthProvider} from '../auth/AuthContext'
+import AgentRunsPage from '../pages/AgentRunsPage'
 import {resourceRegistry} from '../permissions/registry'
-import {authorization} from '../test/fixtures'
+import {authorization, run} from '../test/fixtures'
 import {
   buildTianjiCatalogPages,
   canAccessTianjiRoute,
   matchTianjiRoute,
   tianjiWorkbenchRoutes,
 } from './routes'
+
+const mockedAuth = vi.hoisted(() => ({
+  status: 'ready' as const,
+  authorization: null as ReturnType<typeof authorization> | null,
+  allows: () => true,
+  login: () => {},
+  logout: async () => {},
+  retry: async () => {},
+}))
+
+vi.mock('../auth/AuthContext', () => ({
+  AuthProvider: ({children}: {children: ReactNode}) => children,
+  useAuth: () => mockedAuth,
+}))
 
 const makeChecker = (codes: string[]) => {
   const {snapshot, binding} = authorization('20', codes)
@@ -93,5 +115,52 @@ describe('tianjiWorkbenchRoutes', () => {
     expect(legacy?.route.pattern).toBe('/tasks/:taskId')
     expect(legacy?.route.legacyHandoff).toBe(true)
     expect(legacy?.params).toEqual({taskId: 'task-7'})
+  })
+})
+
+describe('tianji embedded AgentRunsPage WorkspaceList', () => {
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it('renders AgentRunsPage inside WorkspaceList regions when embedded', async () => {
+    vi.spyOn(agentApi, 'list').mockResolvedValue({
+      items: [run()],
+      nextCursor: 'cursor-2',
+    })
+    mockedAuth.authorization = authorization('20', ['TIANJI_AGENT_READ'])
+    const host: WorkbenchHost = {
+      attach: () => ({ok: true}),
+      reportCatalog: () => ({ok: true}),
+      requestNavigation: () => ({ok: true}),
+    }
+
+    const {container} = render(
+      createElement(
+        AuthProvider,
+        null,
+        createElement(
+          MemoryRouter,
+          {initialEntries: ['/runs']},
+          createElement(EmbeddedWorkbench, {
+            host,
+            status: 'ready',
+            pages: [],
+            onPresent: async () => ({ok: true as const}),
+            children: createElement(
+              Routes,
+              null,
+              createElement(Route, {path: '/runs', element: createElement(AgentRunsPage)}),
+            ),
+          }),
+        ),
+      ),
+    )
+
+    expect(await screen.findByText('research')).toBeInTheDocument()
+    await waitFor(() => expect(container.querySelector('[data-region="table"]')).toBeInTheDocument())
+    expect(container.querySelector('[data-region="toolbar"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-region="pagination"]')).toBeInTheDocument()
   })
 })

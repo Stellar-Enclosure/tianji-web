@@ -1,4 +1,4 @@
-import {ApiError} from '@stellar-enclosure/stellar-enclosure-web-shared'
+import {ApiError, useEmbeddedWorkbench} from '@stellar-enclosure/stellar-enclosure-web-shared'
 import {Alert, Button, Card, Form, Input, Space, Table, Tag, Typography, type TableColumnsType} from 'antd'
 import {useLayoutEffect, useRef, useState} from 'react'
 import {Link} from 'react-router-dom'
@@ -64,6 +64,7 @@ export default function WorkerFailuresPage() {
 }
 
 function WorkerFailureLookup({tenant}: {tenant: string}) {
+  const {embedded} = useEmbeddedWorkbench()
   const {allows} = useAuth()
   const currentAllows = useRef(allows)
   const [form] = Form.useForm<LookupForm>()
@@ -119,13 +120,15 @@ function WorkerFailureLookup({tenant}: {tenant: string}) {
     }
   }
 
-  return <section aria-labelledby="worker-failures-title" className="page-stack">
-    <div className="page-heading">
-      <div>
-        <Typography.Title id="worker-failures-title" level={2}>Worker 失败观察</Typography.Title>
-        <Typography.Text type="secondary">输入已知且由当前身份启动的流程实例标识，查看服务端失败快照。</Typography.Text>
+  return <section aria-labelledby={embedded ? undefined : 'worker-failures-title'} aria-label={embedded ? 'Worker 失败观察' : undefined} className="page-stack">
+    {!embedded && (
+      <div className="page-heading">
+        <div>
+          <Typography.Title id="worker-failures-title" level={2}>Worker 失败观察</Typography.Title>
+          <Typography.Text type="secondary">输入已知且由当前身份启动的流程实例标识，查看服务端失败快照。</Typography.Text>
+        </div>
       </div>
-    </div>
+    )}
     <Card variant="borderless" className="surface-card" title="查询流程实例">
       <Form form={form} layout="vertical" initialValues={{instanceId: ''}} onValuesChange={edit}
         onFinish={values => void load(values)} onFinishFailed={() => form.focusField('instanceId')}>
