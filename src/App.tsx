@@ -111,7 +111,8 @@ function TianjiWorkbenchRouter({workbenchHost}: {readonly workbenchHost: Workben
 }
 
 function TianjiWorkbenchBridge({workbenchHost}: {readonly workbenchHost: WorkbenchHost}) {
-  const {status, authorization, allows} = useAuth()
+  const {status, error, login, retry, authorization, allows, standaloneUrl} = useAuth()
+  const {pathname} = useLocation()
   const navigate = useNavigate()
 
   const pages = useMemo(() => {
@@ -143,6 +144,30 @@ function TianjiWorkbenchBridge({workbenchHost}: {readonly workbenchHost: Workben
     return bridgeOk()
   }, [allows, navigate])
 
+  const body = status === 'loading'
+    ? <Spin fullscreen description="正在验证会话" />
+    : status !== 'ready'
+      ? (
+        <main className="auth-shell">
+          <Card variant="borderless" className="auth-card">
+            <Result
+              status={status === 'forbidden' ? '403' : status === 'error' ? 'error' : 'info'}
+              title={status === 'forbidden' ? '没有访问权限' : status === 'error' ? '暂时无法验证' : '登录天机'}
+              subTitle={error ?? (status === 'forbidden' ? '当前身份没有访问天机控制台的权限。' : '使用平台账号继续。')}
+              extra={status === 'signed-out' ? [
+                <Button key="login" type="primary" onClick={() => void login(pathname)}>登录</Button>,
+                standaloneUrl && <a key="standalone" href={standaloneUrl} target="_blank" rel="noopener noreferrer">独立打开</a>,
+              ] : <Button type="primary" onClick={() => void retry()}>重新验证</Button>}
+            />
+          </Card>
+        </main>
+      )
+      : (
+        <div className="tianji-workbench-outlet" style={{width: '100%', minWidth: 0}}>
+          <Outlet />
+        </div>
+      )
+
   return (
     <EmbeddedWorkbench
       host={workbenchHost}
@@ -150,9 +175,7 @@ function TianjiWorkbenchBridge({workbenchHost}: {readonly workbenchHost: Workben
       pages={pages}
       onPresent={handlePresent}
     >
-      <div className="tianji-workbench-outlet" style={{width: '100%', minWidth: 0}}>
-        <Outlet />
-      </div>
+      {body}
     </EmbeddedWorkbench>
   )
 }
